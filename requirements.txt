@@ -1,0 +1,6 @@
+yfinance
+pandas
+gspread
+google-auth
+pytz
+openpyxl

@@ -1,0 +1,19 @@
+# 認証情報
+*.json
+*.env
+secrets/
+
+# キャッシュ・データ
+data/
+__pycache__/
+*.pyc
+*.xls
+*.xlsx
+
+# ログ・出力
+*.log
+*.md.bak
+
+# Windows
+Thumbs.db
+Desktop.ini
