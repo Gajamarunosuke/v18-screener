@@ -1,20 +1,19 @@
 """
-v18_screener.py — V18シグナル 東証プライム全銘柄スクリーナー
+v10_screener.py — V10シグナル 東証プライム全銘柄スクリーナー（毎日実行）
 
-V18 = KITRA - KNN（KNN除外版）
+V10 = MaaSwing Hybrid Tool v14 のエントリー条件
 エントリー条件:
-  週足: wma5 > wma20 かつ wma60 < wma20 かつ wma20上昇（前週確定）
   日足: MA5 > MA20 > MA60 かつ MA20上昇 かつ 陽線
   近接: 安値がMA20の2.5%以内 or MA5の1.5%以内
-  フィルター: 出来高≥10万 かつ 株価≤5万円
+  フィルター: 出来高(20均)≥10万 かつ 株価≤2万円
+  参考: 週足終値 > 前週終値（参考表示のみ、フィルターではない）
 """
 
-import sys
 import os
 import json
 import urllib.request
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pandas as pd
 import yfinance as yf
@@ -27,8 +26,8 @@ try:
 except ImportError:
     _GSPREAD_OK = False
 
-BASE_DIR     = Path(__file__).resolve().parent
-DATA_DIR     = BASE_DIR / "data" / "storage"
+BASE_DIR  = Path(__file__).resolve().parent
+DATA_DIR  = BASE_DIR / "data" / "storage"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 _obsidian_env = os.environ.get("OBSIDIAN_DIR", "")
@@ -41,41 +40,36 @@ JPX_URL   = (
     "tvdivq0000001vg2-att/data_j.xls"
 )
 
-# V18デフォルト設定（Pine Scriptと同値）
-MIN_VOL     = 100_000
-MAX_PRICE   = 50_000
-MA_S        = 5
-MA_M        = 20
-MA_L        = 60
-WMA_S       = 5
-WMA_M       = 20
-WMA_L       = 60
+MIN_VOL      = 100_000
+MAX_PRICE    = 20_000
+MA_S         = 5
+MA_M         = 20
+MA_L         = 60
 NEAR_M20_PCT = 2.5
 NEAR_M5_PCT  = 1.5
 
-CHUNK = 50   # yfinance 一括取得のバッチサイズ
+CHUNK = 50
 
 
 # ── JPXリスト ────────────────────────────────────────────────────────────────
 
 def get_prime_codes(refresh: bool = False) -> list[str]:
     if refresh or not JPX_CACHE.exists():
-        print("[V18] JPX銘柄リスト取得中...")
+        print("[V10] JPX銘柄リスト取得中...")
         urllib.request.urlretrieve(JPX_URL, JPX_CACHE)
 
     df = pd.read_excel(JPX_CACHE, header=0)
     df.columns = [str(c).strip() for c in df.columns]
     mask = df["市場・商品区分"].str.contains("プライム", na=False)
     codes = df[mask]["コード"].astype(str).str.zfill(4).tolist()
-    print(f"[V18] 東証プライム: {len(codes)}銘柄")
+    print(f"[V10] 東証プライム: {len(codes)}銘柄")
     return codes
 
 
 # ── yfinanceバッチ取得 ───────────────────────────────────────────────────────
 
 def fetch_batch(tickers: list[str], period: str, interval: str) -> pd.DataFrame:
-    """複数ティッカーを一括ダウンロードしてMultiIndex DataFrameを返す"""
-    raw = yf.download(
+    return yf.download(
         tickers,
         period=period,
         interval=interval,
@@ -84,16 +78,15 @@ def fetch_batch(tickers: list[str], period: str, interval: str) -> pd.DataFrame:
         progress=False,
         threads=True,
     )
-    return raw
 
 
 def to_yf_ticker(code: str) -> str:
     return f"{code}.T"
 
 
-# ── V18条件判定（1銘柄） ─────────────────────────────────────────────────────
+# ── V10条件判定（1銘柄） ─────────────────────────────────────────────────────
 
-def check_v18(daily: pd.DataFrame, weekly: pd.DataFrame) -> dict | None:
+def check_v10(daily: pd.DataFrame, weekly: pd.DataFrame) -> dict | None:
     """
     daily  : 日足 DataFrame（Close/Open/High/Low/Volume）
     weekly : 週足 DataFrame（Close）
@@ -101,52 +94,26 @@ def check_v18(daily: pd.DataFrame, weekly: pd.DataFrame) -> dict | None:
     """
     if daily is None or len(daily) < MA_L + 5:
         return None
-    if weekly is None or len(weekly) < WMA_L + 5:
-        return None
 
-    # 日足MA
     d = daily.copy()
-    d["ma5"]  = d["Close"].rolling(MA_S).mean()
-    d["ma20"] = d["Close"].rolling(MA_M).mean()
-    d["ma60"] = d["Close"].rolling(MA_L).mean()
+    d["ma5"]   = d["Close"].rolling(MA_S).mean()
+    d["ma20"]  = d["Close"].rolling(MA_M).mean()
+    d["ma60"]  = d["Close"].rolling(MA_L).mean()
     d["vol20"] = d["Volume"].rolling(20).mean()
 
-    # 週足MA（前週確定 = 最終確定週バーの値）
-    w = weekly.copy()
-    w["wma5"]  = w["Close"].rolling(WMA_S).mean()
-    w["wma20"] = w["Close"].rolling(WMA_M).mean()
-    w["wma60"] = w["Close"].rolling(WMA_L).mean()
-
-    # 日足の確定バー選択
-    # 東証は15:30クローズ。市場開場中（JST 9:00-15:30）は今日の足が未確定
+    # 市場時間判定（東証15:30クローズ）
     jst = pytz.timezone("Asia/Tokyo")
     now = datetime.now(jst)
-    market_open = (now.weekday() < 5) and (9 <= now.hour) and not (now.hour > 15 or (now.hour == 15 and now.minute >= 30))
+    market_open = (now.weekday() < 5) and (9 <= now.hour) and not (
+        now.hour > 15 or (now.hour == 15 and now.minute >= 30)
+    )
     if market_open:
-        # 市場開場中: 今日の足は未確定 → 前日確定足を使用
         row  = d.iloc[-2]
         prev = d.iloc[-3]
     else:
-        # 市場クローズ後: 今日の足は確定済み
         row  = d.iloc[-1]
         prev = d.iloc[-2]
 
-    # 週足は最後から2行目（前週確定）をV18の[1]とする
-    if len(w) < 2:
-        return None
-    wrow  = w.iloc[-1]   # 今週（まだ確定していない可能性）
-    wprev = w.iloc[-2]   # 前週確定 ← Pine Scriptの[1]に相当
-
-    # 週足条件（前週確定データで判定）
-    weekly_ok = (
-        (wprev["wma5"]  > wprev["wma20"]) and
-        (wprev["wma60"] < wprev["wma20"]) and
-        (wprev["wma20"] > w.iloc[-3]["wma20"] if len(w) >= 3 else False)
-    )
-    if not weekly_ok:
-        return None
-
-    # 日足条件
     ma5  = row["ma5"]
     ma20 = row["ma20"]
     ma60 = row["ma60"]
@@ -163,66 +130,67 @@ def check_v18(daily: pd.DataFrame, weekly: pd.DataFrame) -> dict | None:
     near_m20 = (row["Low"] > ma20) and (dist_m < NEAR_M20_PCT)
     near_m5  = (row["Low"] > ma5)  and (dist_s < NEAR_M5_PCT)
 
-    sig_in = is_perfect and is_m_up and is_bull and filt_ok and (near_m20 or near_m5)
-
-    if not sig_in:
+    if not (is_perfect and is_m_up and is_bull and filt_ok and (near_m20 or near_m5)):
         return None
 
+    # 週足トレンド（参考情報）
+    weekly_up = False
+    if weekly is not None and len(weekly) >= 2:
+        weekly_up = weekly["Close"].iloc[-1] > weekly["Close"].iloc[-2]
+
     return {
-        "close":   round(row["Close"], 0),
-        "ma5":     round(ma5, 1),
-        "ma20":    round(ma20, 1),
-        "ma60":    round(ma60, 1),
-        "dist_m":  round(dist_m, 2),
-        "dist_s":  round(dist_s, 2),
-        "near":    "MA20" if near_m20 else "MA5",
-        "vol20":   int(row["vol20"]),
+        "close":     round(row["Close"], 0),
+        "ma5":       round(ma5, 1),
+        "ma20":      round(ma20, 1),
+        "ma60":      round(ma60, 1),
+        "dist_m":    round(dist_m, 2),
+        "dist_s":    round(dist_s, 2),
+        "near":      "MA20" if near_m20 else "MA5",
+        "vol20":     int(row["vol20"]),
+        "weekly_up": weekly_up,
     }
 
 
 # ── スクリーニング本体 ────────────────────────────────────────────────────────
 
 def run_screener(refresh_jpx: bool = False) -> list[dict]:
-    codes = get_prime_codes(refresh=refresh_jpx)
+    codes   = get_prime_codes(refresh=refresh_jpx)
     tickers = [to_yf_ticker(c) for c in codes]
-
     results = []
-    total = len(tickers)
+    total   = len(tickers)
 
     for start in range(0, total, CHUNK):
-        chunk = tickers[start:start + CHUNK]
+        chunk       = tickers[start:start + CHUNK]
         chunk_codes = codes[start:start + CHUNK]
         print(f"  [{start+1}-{min(start+CHUNK, total)}/{total}] 取得中...")
 
         try:
             daily_all  = fetch_batch(chunk, period="1y",  interval="1d")
-            weekly_all = fetch_batch(chunk, period="5y",  interval="1wk")
+            weekly_all = fetch_batch(chunk, period="2y",  interval="1wk")
         except Exception as e:
             print(f"    [警告] 取得失敗: {e}")
             continue
 
         for code, ticker in zip(chunk_codes, chunk):
             try:
-                # MultiIndex の場合
                 if isinstance(daily_all.columns, pd.MultiIndex):
                     if ticker not in daily_all.columns.get_level_values(0):
                         continue
                     d = daily_all[ticker].dropna()
-                    w = weekly_all[ticker].dropna()
+                    w = weekly_all[ticker].dropna() if ticker in weekly_all.columns.get_level_values(0) else None
                 else:
-                    # 単一銘柄の場合（チャンクサイズ1）
                     d = daily_all.dropna()
                     w = weekly_all.dropna()
 
-                info = check_v18(d, w)
+                info = check_v10(d, w)
                 if info:
                     info["code"]   = code
                     info["ticker"] = ticker
                     results.append(info)
-                    print(f"    ✅ {code} close={info['close']} dist={info['dist_m']}%")
+                    print(f"    OK {code} close={info['close']} dist={info['dist_m']}% weekly={'up' if info['weekly_up'] else '--'}")
 
-            except Exception as e:
-                pass  # 個別銘柄のエラーは無視して続行
+            except Exception:
+                pass
 
     return results
 
@@ -231,10 +199,10 @@ def run_screener(refresh_jpx: bool = False) -> list[dict]:
 
 def save_report(results: list[dict]) -> Path:
     today = datetime.now().strftime("%Y-%m-%d")
-    path  = OBSIDIAN_DIR / f"{today}_v18_screener.md"
+    path  = OBSIDIAN_DIR / f"{today}_v10_screener.md"
 
     lines = [
-        f"# V18スクリーナー結果 {today}",
+        f"# V10スクリーナー結果 {today}",
         f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
         f"ヒット銘柄: {len(results)}件",
         "",
@@ -244,29 +212,30 @@ def save_report(results: list[dict]) -> Path:
 
     if results:
         lines += [
-            "| コード | 終値 | MA5 | MA20 | MA60 | MA距離 | 近接 | 出来高(20均) |",
-            "|--------|------|-----|------|------|--------|------|------------|",
+            "| コード | 終値 | MA5 | MA20 | MA60 | MA距離 | 近接 | 週足 | 出来高(20均) |",
+            "|--------|------|-----|------|------|--------|------|------|------------|",
         ]
         for r in sorted(results, key=lambda x: x["dist_m"]):
+            w_mark = "上昇" if r["weekly_up"] else "---"
             lines.append(
                 f"| [[{r['code']}]] | {r['close']:.0f} | {r['ma5']:.1f} | "
                 f"{r['ma20']:.1f} | {r['ma60']:.1f} | {r['dist_m']:.2f}% | "
-                f"{r['near']} | {r['vol20']:,} |"
+                f"{r['near']} | {w_mark} | {r['vol20']:,} |"
             )
     else:
         lines.append("本日の候補なし")
 
     lines += [
         "",
-        "## 条件（V18 = KITRA - KNN）",
-        "- 週足: wMA5 > wMA20, wMA60 < wMA20, wMA20上昇（前週確定）",
+        "## 条件（V10 = MaaSwing 日足エントリー）",
         "- 日足: MA5 > MA20 > MA60, MA20上昇, 陽線",
         "- 近接: 安値がMA20の2.5%以内 or MA5の1.5%以内",
-        "- フィルター: 出来高≥10万, 株価≤5万円",
+        "- フィルター: 出来高≥10万, 株価≤2万円",
+        "- 週足: 参考表示のみ（終値 > 前週終値）",
     ]
 
     path.write_text("\n".join(lines), encoding="utf-8")
-    print(f"[V18] レポート保存: {path}")
+    print(f"[V10] レポート保存: {path}")
     return path
 
 
@@ -288,129 +257,106 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
         urllib.request.urlopen(req, timeout=10)
 
     if not results:
-        _post(f"**V18スクリーナー {today}**\n本日の候補なし")
-        print("[V18] Discord通知送信完了")
+        _post(f"**V10スクリーナー {today}**\n本日の候補なし")
+        print("[V10] Discord通知送信完了")
         return
 
     sorted_results = sorted(results, key=lambda x: x["dist_m"])
     CHUNK_SIZE = 25
     chunks = [sorted_results[i:i + CHUNK_SIZE] for i in range(0, len(sorted_results), CHUNK_SIZE)]
-    total = len(results)
+    total  = len(results)
 
     for idx, chunk in enumerate(chunks):
         header = (
-            f"**V18スクリーナー {today} {run_time}** — **{total}銘柄**ヒット"
+            f"**V10スクリーナー {today} {run_time}** — **{total}銘柄**ヒット"
             if idx == 0
-            else f"**V18スクリーナー {today}** ({idx + 1}/{len(chunks)})"
+            else f"**V10スクリーナー {today}** ({idx + 1}/{len(chunks)})"
         )
-        rows = [f"{'コード':<6} {'終値':>6} {'MA距離':>6} {'近接':<4}", "-" * 32]
+        rows = [f"{'コード':<6} {'終値':>6} {'MA距離':>6} {'近接':<4} {'週足'}", "-" * 38]
         for r in chunk:
-            rows.append(f"{r['code']:<6} {r['close']:>6.0f} {r['dist_m']:>5.2f}% {r['near']:<4}")
+            w_mark = "上昇" if r["weekly_up"] else "---"
+            rows.append(f"{r['code']:<6} {r['close']:>6.0f} {r['dist_m']:>5.2f}% {r['near']:<4} {w_mark}")
         _post("\n".join([header, "```", *rows, "```"]))
 
-    print(f"[V18] Discord通知送信完了 ({len(chunks)}メッセージ)")
+    print(f"[V10] Discord通知送信完了 ({len(chunks)}メッセージ)")
 
 
 # ── Google Spreadsheet出力 ────────────────────────────────────────────────────
 
-def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> str:
-    """V18スクリーナー結果をGoogle Spreadsheetに書き込む。
-    認証: 環境変数 GOOGLE_APPLICATION_CREDENTIALS にサービスアカウントJSONパスを指定。
-    """
+def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> None:
     if not _GSPREAD_OK:
-        print("[V18] gspread未インストール。pip install gspread google-auth を実行してください。")
-        return ""
+        print("[V10] gspread未インストール。pip install gspread google-auth を実行してください。")
+        return
 
     creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
     if not creds_path or not Path(creds_path).exists():
-        print(f"[V18] GOOGLE_APPLICATION_CREDENTIALS が未設定または存在しません: {creds_path!r}")
-        return ""
+        print(f"[V10] GOOGLE_APPLICATION_CREDENTIALS が未設定または存在しません: {creds_path!r}")
+        return
 
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
     ]
     creds = SACredentials.from_service_account_file(creds_path, scopes=scopes)
-    gc = gspread.authorize(creds)
-    sh = gc.open_by_key(spreadsheet_id)
+    gc    = gspread.authorize(creds)
+    sh    = gc.open_by_key(spreadsheet_id)
 
     today    = datetime.now().strftime("%Y-%m-%d")
     run_time = datetime.now().strftime("%H:%M")
-
-    headers = ["コード", "終値", "MA5", "MA20", "MA60", "MA距離(%)", "近接", "出来高(20均)"]
+    headers  = ["コード", "終値", "MA5", "MA20", "MA60", "MA距離(%)", "近接", "週足トレンド", "出来高(20均)"]
 
     data_rows = []
     for r in sorted(results, key=lambda x: x["dist_m"]):
         data_rows.append([
-            r["code"],
-            r["close"],
-            r["ma5"],
-            r["ma20"],
-            r["ma60"],
-            r["dist_m"],
-            r["near"],
+            r["code"], r["close"], r["ma5"], r["ma20"], r["ma60"],
+            r["dist_m"], r["near"],
+            "上昇" if r["weekly_up"] else "---",
             r["vol20"],
         ])
 
-    # ── 日付シート（履歴保持）──
-    try:
-        ws = sh.worksheet(today)
-        ws.clear()
-    except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=today, rows=300, cols=10)
+    for sheet_title in [today, "最新(V10)"]:
+        try:
+            ws = sh.worksheet(sheet_title)
+            ws.clear()
+        except gspread.exceptions.WorksheetNotFound:
+            ws = sh.add_worksheet(title=sheet_title, rows=300, cols=10)
 
-    ws.update(
-        [[f"V18スクリーナー {today} {run_time} 実行 / {len(results)}銘柄ヒット"]] +
-        [headers] +
-        (data_rows if data_rows else [["本日の候補なし"]]),
-        value_input_option="USER_ENTERED",
-    )
+        ws.update(
+            [[f"V10スクリーナー {today} {run_time} 実行 / {len(results)}銘柄ヒット"]] +
+            [headers] +
+            (data_rows if data_rows else [["本日の候補なし"]]),
+            value_input_option="USER_ENTERED",
+        )
 
-    # ── 「最新」シート（常に上書き）──
-    try:
-        latest = sh.worksheet("最新")
-        latest.clear()
-    except gspread.exceptions.WorksheetNotFound:
-        latest = sh.add_worksheet(title="最新", rows=300, cols=10)
-
-    latest.update(
-        [[f"V18スクリーナー {today} {run_time} 実行 / {len(results)}銘柄ヒット"]] +
-        [headers] +
-        (data_rows if data_rows else [["本日の候補なし"]]),
-        value_input_option="USER_ENTERED",
-    )
-
-    url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-    print(f"[V18] Spreadsheet更新完了: {url}")
-    return url
+    print(f"[V10] Spreadsheet更新完了")
 
 
 # ── メイン ───────────────────────────────────────────────────────────────────
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="V18スクリーナー")
-    parser.add_argument("--refresh-jpx", action="store_true", help="JPXリストを再取得")
-    parser.add_argument("--gsheet-id",      default="",  help="Google Spreadsheet ID（省略時はスキップ）")
-    parser.add_argument("--discord-webhook", default="",  help="Discord Webhook URL（省略時はスキップ）")
+    parser = argparse.ArgumentParser(description="V10スクリーナー（毎日実行）")
+    parser.add_argument("--refresh-jpx",      action="store_true", help="JPXリストを再取得")
+    parser.add_argument("--gsheet-id",        default="", help="Google Spreadsheet ID")
+    parser.add_argument("--discord-webhook",  default="", help="Discord Webhook URL")
     args = parser.parse_args()
 
     print(f"\n{'='*60}")
-    print(f"V18 スクリーナー [東証プライム全銘柄]")
+    print(f"V10 スクリーナー [東証プライム全銘柄]")
     print(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
     results = run_screener(refresh_jpx=args.refresh_jpx)
-    path = save_report(results)
+    save_report(results)
 
     if args.gsheet_id:
         save_to_gsheet(results, args.gsheet_id)
 
-    webhook = args.discord_webhook or os.environ.get("DISCORD_WEBHOOK", "")
+    webhook = args.discord_webhook or os.environ.get("DISCORD_WEBHOOK_V10", "")
     if webhook:
         send_discord(webhook, results)
 
-    print(f"\n完了: {len(results)}銘柄ヒット → {path}")
+    print(f"\n完了: {len(results)}銘柄ヒット")
     return results
 
 
