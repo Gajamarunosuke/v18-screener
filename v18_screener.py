@@ -29,7 +29,10 @@ except ImportError:
 
 BASE_DIR     = Path(__file__).resolve().parent
 DATA_DIR     = BASE_DIR / "data" / "storage"
-OBSIDIAN_DIR = Path("D:/60 Obsidian/30_research/note/analysis")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+_obsidian_env = os.environ.get("OBSIDIAN_DIR", "")
+OBSIDIAN_DIR = Path(_obsidian_env) if _obsidian_env else BASE_DIR / "output"
 OBSIDIAN_DIR.mkdir(parents=True, exist_ok=True)
 
 JPX_CACHE = DATA_DIR / "jpx_listing.xls"
