@@ -1,4 +1,4 @@
-name: V18スクリーナー 自動実行
+name: V18 Screener
 
 on:
   schedule:
