@@ -319,21 +319,32 @@ def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> None:
             r["vol20"],
         ])
 
-    for sheet_title in [today, "最新(V10)"]:
-        try:
-            ws = sh.worksheet(sheet_title)
-            ws.clear()
-        except gspread.exceptions.WorksheetNotFound:
-            ws = sh.add_worksheet(title=sheet_title, rows=300, cols=10)
+    # ── 「最新(V10)」シート（常に上書き）──
+    try:
+        latest = sh.worksheet("最新(V10)")
+        latest.clear()
+    except gspread.exceptions.WorksheetNotFound:
+        latest = sh.add_worksheet(title="最新(V10)", rows=300, cols=10)
 
-        ws.update(
-            [[f"V10スクリーナー {today} {run_time} 実行 / {len(results)}銘柄ヒット"]] +
-            [headers] +
-            (data_rows if data_rows else [["本日の候補なし"]]),
-            value_input_option="USER_ENTERED",
-        )
+    latest.update(
+        [[f"V10スクリーナー {today} {run_time} 実行 / {len(results)}銘柄ヒット"]] +
+        [headers] +
+        (data_rows if data_rows else [["本日の候補なし"]]),
+        value_input_option="USER_ENTERED",
+    )
 
-    print(f"[V10] Spreadsheet更新完了")
+    # ── 「V10_履歴」シート（末尾追記）──
+    hist_headers = ["日付", "実行時刻"] + headers
+    try:
+        hist = sh.worksheet("V10_履歴")
+    except gspread.exceptions.WorksheetNotFound:
+        hist = sh.add_worksheet(title="V10_履歴", rows=10000, cols=12)
+        hist.append_row(hist_headers)
+
+    for row in (data_rows if data_rows else [["本日の候補なし"]]):
+        hist.append_row([today, run_time] + row)
+
+    print(f"[V10] Spreadsheet更新完了（最新+履歴）")
 
 
 # ── メイン ───────────────────────────────────────────────────────────────────

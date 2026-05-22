@@ -1,0 +1,29 @@
+// V10チェッカー — MaaSwing 日足エントリーシグナル確認用
+// compare_v10.py の照合に使用。values コマンドで V10_SIGNAL を読み取る。
+//@version=6
+indicator("V10チェッカー", shorttitle="V10_CHECK", overlay=false)
+
+ma5  = ta.sma(close, 5)
+ma20 = ta.sma(close, 20)
+ma60 = ta.sma(close, 60)
+vol20 = ta.sma(volume, 20)
+
+is_perfect = ma5 > ma20 and ma20 > ma60
+is_m_up    = ma20 > ma20[1]
+is_bull    = close > open
+filt_ok    = vol20 >= 100000 and close <= 20000
+
+dist_m  = math.abs(low - ma20) / ma20 * 100
+dist_s  = math.abs(low - ma5)  / ma5  * 100
+near_m20 = low > ma20 and dist_m < 2.5
+near_m5  = low > ma5  and dist_s < 1.5
+
+v10_signal = is_perfect and is_m_up and is_bull and filt_ok and (near_m20 or near_m5)
+
+[w_close, w_prev] = request.security(syminfo.tickerid, "W", [close, close[1]])
+weekly_up = w_close > w_prev
+
+// compare_v10.py が読み取る数値プロット
+plot(v10_signal ? 1 : 0, "V10_SIGNAL", display=display.none)
+plot(is_perfect and is_m_up ? 1 : 0, "DAILY_OK",  display=display.none)
+plot(weekly_up  ? 1 : 0,             "WEEKLY_UP", display=display.none)

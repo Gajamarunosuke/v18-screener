@@ -357,20 +357,6 @@ def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> str:
             r["vol20"],
         ])
 
-    # ── 日付シート（履歴保持）──
-    try:
-        ws = sh.worksheet(today)
-        ws.clear()
-    except gspread.exceptions.WorksheetNotFound:
-        ws = sh.add_worksheet(title=today, rows=300, cols=10)
-
-    ws.update(
-        [[f"V18スクリーナー {today} {run_time} 実行 / {len(results)}銘柄ヒット"]] +
-        [headers] +
-        (data_rows if data_rows else [["本日の候補なし"]]),
-        value_input_option="USER_ENTERED",
-    )
-
     # ── 「最新」シート（常に上書き）──
     try:
         latest = sh.worksheet("最新")
@@ -385,8 +371,19 @@ def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> str:
         value_input_option="USER_ENTERED",
     )
 
+    # ── 「V18_履歴」シート（末尾追記）──
+    hist_headers = ["日付", "実行時刻"] + headers
+    try:
+        hist = sh.worksheet("V18_履歴")
+    except gspread.exceptions.WorksheetNotFound:
+        hist = sh.add_worksheet(title="V18_履歴", rows=10000, cols=12)
+        hist.append_row(hist_headers)
+
+    for row in (data_rows if data_rows else [["本日の候補なし"]]):
+        hist.append_row([today, run_time] + row)
+
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
-    print(f"[V18] Spreadsheet更新完了: {url}")
+    print(f"[V18] Spreadsheet更新完了（最新+履歴）: {url}")
     return url
 
 
