@@ -53,7 +53,7 @@ CHUNK = 50
 
 # ── JPXリスト ────────────────────────────────────────────────────────────────
 
-def get_prime_codes(refresh: bool = False) -> list[str]:
+def get_prime_codes(refresh: bool = False) -> tuple[list[str], dict[str, str]]:
     if refresh or not JPX_CACHE.exists():
         print("[V10] JPX銘柄リスト取得中...")
         urllib.request.urlretrieve(JPX_URL, JPX_CACHE)
@@ -61,9 +61,12 @@ def get_prime_codes(refresh: bool = False) -> list[str]:
     df = pd.read_excel(JPX_CACHE, header=0)
     df.columns = [str(c).strip() for c in df.columns]
     mask = df["市場・商品区分"].str.contains("プライム", na=False)
-    codes = df[mask]["コード"].astype(str).str.zfill(4).tolist()
+    prime = df[mask].copy()
+    codes = prime["コード"].astype(str).str.zfill(4).tolist()
+    name_col = df.columns[2]  # 銘柄名
+    names = dict(zip(prime["コード"].astype(str).str.zfill(4), prime[name_col].astype(str)))
     print(f"[V10] 東証プライム: {len(codes)}銘柄")
-    return codes
+    return codes, names
 
 
 # ── yfinanceバッチ取得 ───────────────────────────────────────────────────────
@@ -154,7 +157,7 @@ def check_v10(daily: pd.DataFrame, weekly: pd.DataFrame) -> dict | None:
 # ── スクリーニング本体 ────────────────────────────────────────────────────────
 
 def run_screener(refresh_jpx: bool = False) -> list[dict]:
-    codes   = get_prime_codes(refresh=refresh_jpx)
+    codes, name_map = get_prime_codes(refresh=refresh_jpx)
     tickers = [to_yf_ticker(c) for c in codes]
     results = []
     total   = len(tickers)
@@ -186,8 +189,9 @@ def run_screener(refresh_jpx: bool = False) -> list[dict]:
                 if info:
                     info["code"]   = code
                     info["ticker"] = ticker
+                    info["name"]   = name_map.get(code, "")
                     results.append(info)
-                    print(f"    OK {code} close={info['close']} dist={info['dist_m']}% weekly={'up' if info['weekly_up'] else '--'}")
+                    print(f"    OK {code} {info['name'][:8]} close={info['close']} dist={info['dist_m']}% weekly={'up' if info['weekly_up'] else '--'}")
 
             except Exception:
                 pass
@@ -272,10 +276,11 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
             if idx == 0
             else f"**V10スクリーナー {today}** ({idx + 1}/{len(chunks)})"
         )
-        rows = [f"{'コード':<6} {'終値':>6} {'MA距離':>6} {'近接':<4} {'週足'}", "-" * 38]
+        rows = [f"{'コード':<6} {'銘柄名':<10} {'終値':>6} {'距離':>5} {'近接':<4} {'週足'}", "-" * 44]
         for r in chunk:
+            name   = r.get("name", "")[:8]
             w_mark = "上昇" if r["weekly_up"] else "---"
-            rows.append(f"{r['code']:<6} {r['close']:>6.0f} {r['dist_m']:>5.2f}% {r['near']:<4} {w_mark}")
+            rows.append(f"{r['code']:<6} {name:<10} {r['close']:>6.0f} {r['dist_m']:>4.2f}% {r['near']:<4} {w_mark}")
         _post("\n".join([header, "```", *rows, "```"]))
 
     print(f"[V10] Discord通知送信完了 ({len(chunks)}メッセージ)")
