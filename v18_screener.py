@@ -295,7 +295,10 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
     payload = json.dumps({"content": content}).encode("utf-8")
     req = urllib.request.Request(
         webhook_url, data=payload,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "DiscordBot (https://github.com, 1.0)",
+        },
     )
     urllib.request.urlopen(req, timeout=10)
     print(f"[V18] Discord通知送信完了")
