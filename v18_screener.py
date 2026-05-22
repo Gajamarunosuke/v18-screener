@@ -379,8 +379,8 @@ def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> str:
         hist = sh.add_worksheet(title="V18_履歴", rows=10000, cols=12)
         hist.append_row(hist_headers)
 
-    for row in (data_rows if data_rows else [["本日の候補なし"]]):
-        hist.append_row([today, run_time] + row)
+    hist_rows = [[today, run_time] + row for row in (data_rows if data_rows else [["本日の候補なし"]])]
+    hist.append_rows(hist_rows, value_input_option="USER_ENTERED")
 
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
     print(f"[V18] Spreadsheet更新完了（最新+履歴）: {url}")
@@ -402,7 +402,9 @@ def main():
     print(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
-    results = run_screener(refresh_jpx=args.refresh_jpx)
+    # 月曜日は自動的にJPXリストをリフレッシュ
+    auto_refresh = args.refresh_jpx or (datetime.now().weekday() == 0)
+    results = run_screener(refresh_jpx=auto_refresh)
     path = save_report(results)
 
     if args.gsheet_id:
