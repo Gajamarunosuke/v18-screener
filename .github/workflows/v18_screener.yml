@@ -21,7 +21,7 @@ jobs:
           python-version: '3.12'
 
       - name: 依存パッケージインストール
-        run: pip install yfinance pandas gspread google-auth pytz openpyxl
+        run: pip install -r requirements.txt
 
       - name: V18スクリーナー実行
         env:
