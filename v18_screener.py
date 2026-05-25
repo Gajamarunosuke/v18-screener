@@ -31,6 +31,16 @@ BASE_DIR     = Path(__file__).resolve().parent
 DATA_DIR     = BASE_DIR / "data" / "storage"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
+# ── ツルハシタガー ────────────────────────────────────────────────────────────
+sys.path.insert(0, str(BASE_DIR / "tools"))
+try:
+    from pickaxe_tagger import tag_results, tagged_count
+    _TAGGER_OK = True
+except ImportError:
+    _TAGGER_OK = False
+    def tag_results(r):   return r
+    def tagged_count(r):  return 0, len(r)
+
 _obsidian_env = os.environ.get("OBSIDIAN_DIR", "")
 OBSIDIAN_DIR = Path(_obsidian_env) if _obsidian_env else BASE_DIR / "output"
 OBSIDIAN_DIR.mkdir(parents=True, exist_ok=True)
@@ -58,20 +68,32 @@ CHUNK = 50   # yfinance 一括取得のバッチサイズ
 
 # ── JPXリスト ────────────────────────────────────────────────────────────────
 
-def get_prime_codes(refresh: bool = False) -> tuple[list[str], dict[str, str]]:
+def get_prime_codes(refresh: bool = False) -> tuple[list[str], dict[str, str], dict[str, str]]:
     if refresh or not JPX_CACHE.exists():
         print("[V18] JPX銘柄リスト取得中...")
         urllib.request.urlretrieve(JPX_URL, JPX_CACHE)
 
     df = pd.read_excel(JPX_CACHE, header=0)
     df.columns = [str(c).strip() for c in df.columns]
-    mask = df["市場・商品区分"].str.contains("プライム", na=False)
-    prime = df[mask].copy()
-    codes = prime["コード"].astype(str).str.zfill(4).tolist()
     name_col = df.columns[2]  # 銘柄名
-    names = dict(zip(prime["コード"].astype(str).str.zfill(4), prime[name_col].astype(str)))
-    print(f"[V18] 東証プライム: {len(codes)}銘柄")
-    return codes, names
+
+    prime_mask    = df["市場・商品区分"].str.contains("プライム", na=False)
+    standard_mask = df["市場・商品区分"].str.contains("スタンダード", na=False)
+    target = df[prime_mask | standard_mask].copy()
+
+    codes = target["コード"].astype(str).str.zfill(4).tolist()
+    names = dict(zip(target["コード"].astype(str).str.zfill(4), target[name_col].astype(str)))
+
+    market_map = {}
+    for _, row in target.iterrows():
+        code = str(row["コード"]).zfill(4)
+        market_str = str(row["市場・商品区分"])
+        market_map[code] = "standard" if "スタンダード" in market_str else "prime"
+
+    n_prime    = prime_mask.sum()
+    n_standard = standard_mask.sum()
+    print(f"[V18] 東証プライム: {n_prime}銘柄 / スタンダード: {n_standard}銘柄")
+    return codes, names, market_map
 
 
 # ── yfinanceバッチ取得 ───────────────────────────────────────────────────────
@@ -186,7 +208,7 @@ def check_v18(daily: pd.DataFrame, weekly: pd.DataFrame) -> dict | None:
 # ── スクリーニング本体 ────────────────────────────────────────────────────────
 
 def run_screener(refresh_jpx: bool = False) -> list[dict]:
-    codes, name_map = get_prime_codes(refresh=refresh_jpx)
+    codes, name_map, market_map = get_prime_codes(refresh=refresh_jpx)
     tickers = [to_yf_ticker(c) for c in codes]
 
     results = []
@@ -222,6 +244,7 @@ def run_screener(refresh_jpx: bool = False) -> list[dict]:
                     info["code"]   = code
                     info["ticker"] = ticker
                     info["name"]   = name_map.get(code, "")
+                    info["market"] = market_map.get(code, "prime")
                     results.append(info)
                     print(f"    OK {code} {info['name'][:8]} close={info['close']} dist={info['dist_m']}%")
 
@@ -237,26 +260,39 @@ def save_report(results: list[dict]) -> Path:
     today = datetime.now().strftime("%Y-%m-%d")
     path  = OBSIDIAN_DIR / f"{today}_v18_screener.md"
 
+    n_tagged, n_total = tagged_count(results)
     lines = [
         f"# V18スクリーナー結果 {today}",
         f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        f"ヒット銘柄: {len(results)}件",
+        f"ヒット銘柄: {n_total}件（ツルハシタグあり: {n_tagged}件）",
         "",
         "## エントリー候補",
         "",
     ]
 
     if results:
-        lines += [
-            "| コード | 終値 | MA5 | MA20 | MA60 | MA距離 | 近接 | 出来高(20均) |",
-            "|--------|------|-----|------|------|--------|------|------------|",
-        ]
-        for r in sorted(results, key=lambda x: x["dist_m"]):
-            lines.append(
-                f"| [[{r['code']}]] | {r['close']:.0f} | {r['ma5']:.1f} | "
-                f"{r['ma20']:.1f} | {r['ma60']:.1f} | {r['dist_m']:.2f}% | "
-                f"{r['near']} | {r['vol20']:,} |"
-            )
+        prime    = [r for r in results if r.get("market") != "standard"]
+        standard = [r for r in results if r.get("market") == "standard"]
+        for label, section in [("プライム市場", prime), ("スタンダード市場", standard)]:
+            if not section:
+                continue
+            lines += [
+                f"### {label}（{len(section)}銘柄）",
+                "",
+                "| コード | 終値 | MA距離 | 近接 | テーマ | ツルハシ層 | 制約 | 証拠 |",
+                "|--------|------|--------|------|--------|-----------|------|------|",
+            ]
+            for r in sorted(section, key=lambda x: x["dist_m"]):
+                theme = r.get("theme_source", "") or "—"
+                layer = r.get("pickaxe_layer", "") or "—"
+                ctype = r.get("constraint_type", "") or "—"
+                evlv  = r.get("evidence_level", "") or "—"
+                lines.append(
+                    f"| [[{r['code']}]] {r.get('name','')[:6]} | {r['close']:.0f} | "
+                    f"{r['dist_m']:.2f}% | {r['near']} | "
+                    f"{theme} | {layer} | {ctype} | {evlv} |"
+                )
+            lines.append("")
     else:
         lines.append("本日の候補なし")
 
@@ -296,24 +332,32 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
         print("[V18] Discord通知送信完了")
         return
 
-    sorted_results = sorted(results, key=lambda x: x["dist_m"])
-    CHUNK_SIZE = 25
-    chunks = [sorted_results[i:i + CHUNK_SIZE] for i in range(0, len(sorted_results), CHUNK_SIZE)]
-    total = len(results)
+    prime    = sorted([r for r in results if r.get("market") != "standard"], key=lambda x: x["dist_m"])
+    standard = sorted([r for r in results if r.get("market") == "standard"],  key=lambda x: x["dist_m"])
+    total    = len(results)
 
-    for idx, chunk in enumerate(chunks):
-        header = (
-            f"**V18スクリーナー {today} {run_time}** — **{total}銘柄**ヒット"
-            if idx == 0
-            else f"**V18スクリーナー {today}** ({idx + 1}/{len(chunks)})"
-        )
-        rows = [f"{'コード':<6} {'銘柄名':<10} {'終値':>6} {'距離':>5} {'近接':<4}", "-" * 38]
-        for r in chunk:
-            name = r.get("name", "")[:8]
-            rows.append(f"{r['code']:<6} {name:<10} {r['close']:>6.0f} {r['dist_m']:>4.2f}% {r['near']:<4}")
-        _post("\n".join([header, "```", *rows, "```"]))
+    def _post_section(section: list[dict], label: str, is_first: bool) -> int:
+        if not section:
+            return 0
+        CHUNK_SIZE = 25
+        chunks = [section[i:i + CHUNK_SIZE] for i in range(0, len(section), CHUNK_SIZE)]
+        msg_count = 0
+        for idx, chunk in enumerate(chunks):
+            if is_first and idx == 0:
+                header = f"**V18スクリーナー {today} {run_time}** — **{total}銘柄**ヒット（プライム {len(prime)} / スタンダード {len(standard)}）\n**【{label}】**"
+            else:
+                header = f"**【{label}】** ({idx + 1}/{len(chunks)})"
+            rows = [f"{'コード':<6} {'銘柄名':<10} {'終値':>6} {'距離':>5} {'近接':<4}", "-" * 38]
+            for r in chunk:
+                name = r.get("name", "")[:8]
+                rows.append(f"{r['code']:<6} {name:<10} {r['close']:>6.0f} {r['dist_m']:>4.2f}% {r['near']:<4}")
+            _post("\n".join([header, "```", *rows, "```"]))
+            msg_count += 1
+        return msg_count
 
-    print(f"[V18] Discord通知送信完了 ({len(chunks)}メッセージ)")
+    n  = _post_section(prime,    "プライム市場",    is_first=True)
+    n += _post_section(standard, "スタンダード市場", is_first=(len(prime) == 0))
+    print(f"[V18] Discord通知送信完了 ({n}メッセージ)")
 
 
 # ── Google Spreadsheet出力 ────────────────────────────────────────────────────
@@ -402,9 +446,14 @@ def main():
     print(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
-    # 月曜日は自動的にJPXリストをリフレッシュ
-    auto_refresh = args.refresh_jpx or (datetime.now().weekday() == 0)
+    # キャッシュが30日以上古い場合のみ自動リフレッシュ
+    if JPX_CACHE.exists():
+        cache_age_days = (datetime.now() - datetime.fromtimestamp(JPX_CACHE.stat().st_mtime)).days
+        auto_refresh = args.refresh_jpx or cache_age_days >= 30
+    else:
+        auto_refresh = True
     results = run_screener(refresh_jpx=auto_refresh)
+    results = tag_results(results)   # ツルハシタグ付与
     path = save_report(results)
 
     if args.gsheet_id:

@@ -362,8 +362,12 @@ def main():
     print(f"実行日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*60}\n")
 
-    # 月曜日は自動的にJPXリストをリフレッシュ
-    auto_refresh = args.refresh_jpx or (datetime.now().weekday() == 0)
+    # キャッシュが30日以上古い場合のみ自動リフレッシュ
+    if JPX_CACHE.exists():
+        cache_age_days = (datetime.now() - datetime.fromtimestamp(JPX_CACHE.stat().st_mtime)).days
+        auto_refresh = args.refresh_jpx or cache_age_days >= 30
+    else:
+        auto_refresh = True
     results = run_screener(refresh_jpx=auto_refresh)
     save_report(results)
 
