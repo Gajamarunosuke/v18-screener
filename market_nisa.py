@@ -46,14 +46,14 @@ WEBHOOK_ENV = "DISCORD_WEBHOOK_MARKET_NISA"
 
 
 MARKET_LINKS = {
-    "USD/JPY": "https://www.google.com/finance/quote/USD-JPY",
-    "日経平均": "https://finance.yahoo.co.jp/quote/998407.O",
-    "TOPIX": "https://finance.yahoo.co.jp/quote/998405.T",
-    "VIX": "https://www.google.com/finance/quote/VIX:INDEXCBOE",
-    "S&P500": "https://www.google.com/finance/quote/.INX:INDEXSP",
-    "NASDAQ100": "https://www.google.com/finance/quote/NDX:INDEXNASDAQ",
-    "SOX": "https://www.google.com/finance/quote/SOX:INDEXNASDAQ",
-    "Gold": "https://www.google.com/finance/quote/GCW00:COMEX",
+    "USD/JPY": ("G", "https://www.google.com/finance/quote/USD-JPY"),
+    "日経平均": ("Y", "https://finance.yahoo.co.jp/quote/998407.O"),
+    "TOPIX": ("Y", "https://finance.yahoo.co.jp/quote/998405.T"),
+    "VIX": ("G", "https://www.google.com/finance/quote/VIX:INDEXCBOE"),
+    "S&P500": ("G", "https://www.google.com/finance/quote/.INX:INDEXSP"),
+    "NASDAQ100": ("G", "https://www.google.com/finance/quote/NDX:INDEXNASDAQ"),
+    "SOX": ("G", "https://www.google.com/finance/quote/SOX:INDEXNASDAQ"),
+    "Gold": ("G", "https://www.google.com/finance/quote/GCW00:COMEX"),
 }
 
 
@@ -242,7 +242,8 @@ def build_morning_message() -> str:
         digits = 3 if name == "USD/JPY" else 2
         value = fmt_value(row.get("value"), digits=digits)
         change_pct = fmt_pct(row.get("change_pct"))
-        lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link('Yahoo/Google', MARKET_LINKS[name])}")
+        link_label, link_url = MARKET_LINKS[name]
+        lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link(link_label, link_url)}")
         if row.get("error") or value == "--":
             fetch_errors.append(name)
 
@@ -279,7 +280,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('Yahoo', FUND_LINKS[name])}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('Y', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
@@ -290,7 +291,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('Yahoo', FUND_LINKS[name])}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('Y', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
