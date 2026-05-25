@@ -1,6 +1,8 @@
 import argparse
+import html
 import json
 import os
+import re
 import sys
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -68,14 +70,26 @@ MARKET_TICKERS = {
 
 
 FUND_LINKS = {
-    "eMAXIS Slim オルカン": "https://emaxis.am.mufg.jp/fund/253425.html",
-    "楽天オルカン": "https://www.rakuten-toushin.co.jp/fund/nav/9I31223C/",
-    "楽天S&P500": "https://www.rakuten-toushin.co.jp/fund/nav/9I31223E/",
-    "ニッセイNASDAQ100": "https://www.nam.co.jp/fundinfo/nn100if/main.html",
-    "ニッセイSOX": "https://www.nam.co.jp/fundinfo/nsoxif/main.html",
-    "ゴールドファンド": "https://www.am.mufg.jp/fund/140567.html",
-    "FANG+": "https://www.daiwa-am.co.jp/funds/detail/3344/detail_top.html",
-    "野村世界半導体": "https://www.nomura-am.co.jp/fund/funddetail.php?fundcd=140779",
+    "eMAXIS Slim オルカン": "https://finance.yahoo.co.jp/quote/0331418A/history",
+    "楽天オルカン": "https://finance.yahoo.co.jp/quote/9I31123A/history",
+    "楽天S&P500": "https://finance.yahoo.co.jp/quote/9I31223A/history",
+    "ニッセイNASDAQ100": "https://finance.yahoo.co.jp/quote/29313233/history",
+    "ニッセイSOX": "https://finance.yahoo.co.jp/quote/29314233/history",
+    "ゴールドファンド": "https://finance.yahoo.co.jp/quote/03311112/history",
+    "FANG+": "https://finance.yahoo.co.jp/quote/04311181/history",
+    "野村世界半導体": "https://finance.yahoo.co.jp/quote/01313098/history",
+}
+
+
+FUND_CODES = {
+    "eMAXIS Slim オルカン": "0331418A",
+    "楽天オルカン": "9I31123A",
+    "楽天S&P500": "9I31223A",
+    "ニッセイNASDAQ100": "29313233",
+    "ニッセイSOX": "29314233",
+    "ゴールドファンド": "03311112",
+    "FANG+": "04311181",
+    "野村世界半導体": "01313098",
 }
 
 
@@ -100,6 +114,14 @@ def fmt_pct(value: float | None) -> str:
     return f"{sign}{value:.2f}%"
 
 
+def parse_number(value: str) -> float | None:
+    cleaned = value.replace(",", "").replace("+", "").replace("−", "-").strip()
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
 def fetch_market_rows() -> dict[str, dict]:
     try:
         import yfinance as yf
@@ -121,6 +143,55 @@ def fetch_market_rows() -> dict[str, dict]:
             previous = float(closes.iloc[-2]) if len(closes) >= 2 else None
             change_pct = ((latest / previous) - 1) * 100 if previous else None
             rows[name] = {"value": latest, "change_pct": change_pct}
+        except Exception as exc:
+            rows[name] = {"error": str(exc)}
+    return rows
+
+
+def fetch_yahoo_fund_rows() -> dict[str, dict]:
+    rows: dict[str, dict] = {}
+    headers = {"User-Agent": "Mozilla/5.0"}
+    row_pattern = re.compile(
+        r"(\d{4})年(\d{1,2})月(\d{1,2})日\s+([\d,]+)\s*([+\-−][\d,]+)\s+[\d,]+"
+    )
+
+    for name, code in FUND_CODES.items():
+        url = f"https://finance.yahoo.co.jp/quote/{code}/history"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                text = resp.read().decode("utf-8", errors="replace")
+            text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+            matches = row_pattern.findall(text)
+            parsed = []
+            for year, month, day, nav_text, diff_text in matches:
+                nav = parse_number(nav_text)
+                diff = parse_number(diff_text)
+                if nav is None or diff is None:
+                    continue
+                parsed.append(
+                    {
+                        "date": (int(year), int(month), int(day)),
+                        "value": nav,
+                        "diff": diff,
+                    }
+                )
+            if not parsed:
+                rows[name] = {}
+                continue
+
+            latest = parsed[0]
+            previous_value = latest["value"] - latest["diff"] if latest["diff"] is not None else None
+            change_pct = (latest["diff"] / previous_value * 100) if previous_value else None
+            latest_year = latest["date"][0]
+            ytd_base = next((r["value"] for r in reversed(parsed) if r["date"][0] == latest_year), None)
+            ytd_pct = ((latest["value"] / ytd_base) - 1) * 100 if ytd_base else None
+            rows[name] = {
+                "value": latest["value"],
+                "change_pct": change_pct,
+                "ytd_pct": ytd_pct,
+                "date": f"{latest['date'][0]}/{latest['date'][1]:02d}/{latest['date'][2]:02d}",
+            }
         except Exception as exc:
             rows[name] = {"error": str(exc)}
     return rows
@@ -157,6 +228,8 @@ def build_morning_message() -> str:
 
 
 def build_evening_message() -> str:
+    fund_rows = fetch_yahoo_fund_rows()
+    fetch_errors = []
     lines = [
         f"🌆夕方の投信・指数メモ {today_label()}",
         "",
@@ -172,11 +245,25 @@ def build_evening_message() -> str:
         "ニッセイSOX",
         "ゴールドファンド",
     ]:
-        lines.append(f"{name} --%（年初来 --%） {markdown_link('確認', FUND_LINKS[name])}")
+        row = fund_rows.get(name, {})
+        line = (
+            f"{name} {fmt_pct(row.get('change_pct'))}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))}） {markdown_link('確認', FUND_LINKS[name])}"
+        )
+        lines.append(line)
+        if row.get("error") or row.get("change_pct") is None:
+            fetch_errors.append(name)
 
     lines.extend(["", "【ウォッチ】"])
     for name in ["FANG+", "野村世界半導体"]:
-        lines.append(f"{name} --%（年初来 --%） {markdown_link('確認', FUND_LINKS[name])}")
+        row = fund_rows.get(name, {})
+        line = (
+            f"{name} {fmt_pct(row.get('change_pct'))}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))}） {markdown_link('確認', FUND_LINKS[name])}"
+        )
+        lines.append(line)
+        if row.get("error") or row.get("change_pct") is None:
+            fetch_errors.append(name)
 
     lines.extend(
         [
@@ -185,6 +272,8 @@ def build_evening_message() -> str:
             "SOX・NASDAQ・FANG+の強弱で、半導体/AI/グロース候補の追い風を確認。",
         ]
     )
+    if fetch_errors:
+        lines.extend(["", f"未取得：{', '.join(fetch_errors)}"])
     return "\n".join(lines)
 
 
