@@ -19,6 +19,8 @@ import pandas as pd
 import yfinance as yf
 import pytz
 
+_JST = pytz.timezone("Asia/Tokyo")
+
 try:
     import gspread
     from google.oauth2.service_account import Credentials as SACredentials
@@ -246,8 +248,9 @@ def save_report(results: list[dict]) -> Path:
 # ── Discord通知 ──────────────────────────────────────────────────────────────
 
 def send_discord(webhook_url: str, results: list[dict]) -> None:
-    today    = datetime.now().strftime("%Y-%m-%d")
-    run_time = datetime.now().strftime("%H:%M")
+    _now     = datetime.now(_JST)
+    today    = _now.strftime("%Y-%m-%d")
+    run_time = _now.strftime("%H:%M JST")
 
     def _post(content: str) -> None:
         payload = json.dumps({"content": content}).encode("utf-8")
