@@ -109,8 +109,8 @@ def fetch_market_rows() -> dict[str, dict]:
     rows: dict[str, dict] = {}
     for name, ticker in MARKET_TICKERS.items():
         try:
-            hist = yf.download(ticker, period="5d", interval="1d", progress=False, auto_adjust=False)
-            if hist.empty or "Close" not in hist:
+            hist = yf.Ticker(ticker).history(period="5d")
+            if hist.empty or "Close" not in hist.columns:
                 rows[name] = {}
                 continue
             closes = hist["Close"].dropna()
