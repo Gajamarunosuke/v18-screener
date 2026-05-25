@@ -279,11 +279,11 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
             if idx == 0
             else f"**V10スクリーナー {today}** ({idx + 1}/{len(chunks)})"
         )
-        rows = [f"{'コード':<6} {'銘柄名':<10} {'終値':>6} {'距離':>5} {'近接':<4} {'週足'}", "-" * 44]
+        rows = [f"{'コード':<6} {'銘柄名':<10} {'終値':>6} {'近接':<4} {'週足'}", "-" * 37]
         for r in chunk:
             name   = r.get("name", "")[:8]
             w_mark = "上昇" if r["weekly_up"] else "---"
-            rows.append(f"{r['code']:<6} {name:<10} {r['close']:>6.0f} {r['dist_m']:>4.2f}% {r['near']:<4} {w_mark}")
+            rows.append(f"{r['code']:<6} {name:<10} {r['close']:>6.0f} {r['near']:<4} {w_mark}")
         _post("\n".join([header, "```", *rows, "```"]))
 
     print(f"[V10] Discord通知送信完了 ({len(chunks)}メッセージ)")
