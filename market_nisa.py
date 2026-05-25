@@ -242,7 +242,7 @@ def build_morning_message() -> str:
         digits = 3 if name == "USD/JPY" else 2
         value = fmt_value(row.get("value"), digits=digits)
         change_pct = fmt_pct(row.get("change_pct"))
-        lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link('確認', MARKET_LINKS[name])}")
+        lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link('Yahoo/Google', MARKET_LINKS[name])}")
         if row.get("error") or value == "--":
             fetch_errors.append(name)
 
@@ -279,7 +279,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('Yahoo', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
@@ -290,7 +290,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('Yahoo', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
