@@ -176,42 +176,52 @@ def fetch_yahoo_index_row(code: str) -> dict:
 def fetch_yahoo_fund_rows() -> dict[str, dict]:
     rows: dict[str, dict] = {}
     headers = {"User-Agent": "Mozilla/5.0"}
-    row_pattern = re.compile(
-        r"(\d{4})年(\d{1,2})月(\d{1,2})日\s+([\d,]+)\s*([+\-−][\d,]+)\s+[\d,]+"
-    )
+    year = datetime.now(JST).year
+    from_date = f"{year}0101"
+    to_date = datetime.now(JST).strftime("%Y%m%d")
 
     for name, code in FUND_CODES.items():
-        url = f"https://finance.yahoo.co.jp/quote/{code}/history"
+        page_url = f"https://finance.yahoo.co.jp/quote/{code}/history"
         try:
-            req = urllib.request.Request(url, headers=headers)
+            req = urllib.request.Request(page_url, headers=headers)
             with urllib.request.urlopen(req, timeout=15) as resp:
-                text = resp.read().decode("utf-8", errors="replace")
-            text = html.unescape(re.sub(r"<[^>]+>", " ", text))
-            matches = row_pattern.findall(text)
-            parsed = []
-            for year, month, day, nav_text, diff_text in matches:
-                nav = parse_number(nav_text)
-                diff = parse_number(diff_text)
-                if nav is None or diff is None:
-                    continue
-                parsed.append(
-                    {
-                        "date": (int(year), int(month), int(day)),
-                        "value": nav,
-                        "diff": diff,
-                    }
-                )
-            if not parsed:
+                page_text = resp.read().decode("utf-8", errors="replace")
+            token_match = re.search(r'jwtToken":"([^"]+)', page_text)
+            if not token_match:
                 rows[name] = {}
                 continue
 
-            latest = parsed[0]
-            previous_value = latest["value"] - latest["diff"] if latest["diff"] is not None else None
-            change_pct = (latest["diff"] / previous_value * 100) if previous_value else None
+            api_url = (
+                f"https://finance.yahoo.co.jp/bff-pc/v1/main/fund/chart/history/{code}"
+                f"?fromDate={from_date}&size=300&timeFrame=daily&toDate={to_date}"
+            )
+            api_headers = {
+                **headers,
+                "Referer": page_url,
+                "jwt-token": token_match.group(1),
+            }
+            req = urllib.request.Request(api_url, headers=api_headers)
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.load(resp)
+            histories = data.get("priceHistories", [])
+            if len(histories) < 2:
+                rows[name] = {}
+                continue
+
+            histories = sorted(histories, key=lambda row: row.get("baseDate", ""))
+            first = histories[0]
+            previous = histories[-2]
+            latest = histories[-1]
+            latest_value = float(latest["closePrice"])
+            previous_value = float(previous["closePrice"])
+            first_value = float(first["closePrice"])
+            change_pct = ((latest_value / previous_value) - 1) * 100 if previous_value else None
+            ytd_pct = ((latest_value / first_value) - 1) * 100 if first_value else None
             rows[name] = {
-                "value": latest["value"],
+                "value": latest_value,
                 "change_pct": change_pct,
-                "date": f"{latest['date'][0]}/{latest['date'][1]:02d}/{latest['date'][2]:02d}",
+                "ytd_pct": ytd_pct,
+                "date": latest.get("baseDate"),
             }
         except Exception as exc:
             rows[name] = {"error": str(exc)}
@@ -269,7 +279,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
@@ -280,7 +290,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
+            f"（年初来 {fmt_pct(row.get('ytd_pct'))} / 基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
