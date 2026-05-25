@@ -208,13 +208,9 @@ def fetch_yahoo_fund_rows() -> dict[str, dict]:
             latest = parsed[0]
             previous_value = latest["value"] - latest["diff"] if latest["diff"] is not None else None
             change_pct = (latest["diff"] / previous_value * 100) if previous_value else None
-            latest_year = latest["date"][0]
-            ytd_base = next((r["value"] for r in reversed(parsed) if r["date"][0] == latest_year), None)
-            ytd_pct = ((latest["value"] / ytd_base) - 1) * 100 if ytd_base else None
             rows[name] = {
                 "value": latest["value"],
                 "change_pct": change_pct,
-                "ytd_pct": ytd_pct,
                 "date": f"{latest['date'][0]}/{latest['date'][1]:02d}/{latest['date'][2]:02d}",
             }
         except Exception as exc:
@@ -273,7 +269,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（年初来 {fmt_pct(row.get('ytd_pct'))}） {markdown_link('確認', FUND_LINKS[name])}"
+            f"（基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
@@ -284,7 +280,7 @@ def build_evening_message() -> str:
         row = fund_rows.get(name, {})
         line = (
             f"{name} {fmt_pct(row.get('change_pct'))}"
-            f"（年初来 {fmt_pct(row.get('ytd_pct'))}） {markdown_link('確認', FUND_LINKS[name])}"
+            f"（基準価額 {fmt_value(row.get('value'), digits=0)}） {markdown_link('確認', FUND_LINKS[name])}"
         )
         lines.append(line)
         if row.get("error") or row.get("change_pct") is None:
