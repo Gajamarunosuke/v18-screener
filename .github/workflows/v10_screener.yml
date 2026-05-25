@@ -25,6 +25,7 @@ jobs:
 
       - name: V10スクリーナー実行
         env:
+          TZ: Asia/Tokyo
           DISCORD_WEBHOOK_V10: ${{ secrets.DISCORD_WEBHOOK_V10 }}
           GSHEET_ID: ${{ secrets.GSHEET_ID }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
