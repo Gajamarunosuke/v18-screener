@@ -47,8 +47,8 @@ WEBHOOK_ENV = "DISCORD_WEBHOOK_MARKET_NISA"
 
 MARKET_LINKS = {
     "USD/JPY": "https://www.google.com/finance/quote/USD-JPY",
-    "日経平均": "https://www.google.com/finance/quote/NI225:INDEXNIKKEI",
-    "TOPIX ETF": "https://www.google.com/finance/quote/TOPIX:INDEXTOPIX",
+    "日経平均": "https://finance.yahoo.co.jp/quote/998407.O",
+    "TOPIX": "https://finance.yahoo.co.jp/quote/998405.T",
     "VIX": "https://www.google.com/finance/quote/VIX:INDEXCBOE",
     "S&P500": "https://www.google.com/finance/quote/.INX:INDEXSP",
     "NASDAQ100": "https://www.google.com/finance/quote/NDX:INDEXNASDAQ",
@@ -59,8 +59,6 @@ MARKET_LINKS = {
 
 MARKET_TICKERS = {
     "USD/JPY": "JPY=X",
-    "日経平均": "^N225",
-    "TOPIX ETF": "1306.T",
     "VIX": "^VIX",
     "S&P500": "^GSPC",
     "NASDAQ100": "^NDX",
@@ -145,7 +143,34 @@ def fetch_market_rows() -> dict[str, dict]:
             rows[name] = {"value": latest, "change_pct": change_pct}
         except Exception as exc:
             rows[name] = {"error": str(exc)}
+    rows["日経平均"] = fetch_yahoo_index_row("998407.O")
+    rows["TOPIX"] = fetch_yahoo_index_row("998405.T")
     return rows
+
+
+def fetch_yahoo_index_row(code: str) -> dict:
+    url = f"https://finance.yahoo.co.jp/quote/{code}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            text = resp.read().decode("utf-8", errors="replace")
+        text = html.unescape(text)
+        value_match = re.search(
+            r'PriceBoard__price__1V0k.*?StyledNumber__value__3rXW">([\d,]+\.\d+)'
+            r'.*?PriceChangeLabel__primary__Y_ut.*?StyledNumber__value__3rXW">([+\-−][\d,]+\.\d+)'
+            r'.*?PriceChangeLabel__secondary__3BXI.*?StyledNumber__value__3rXW">([+\-−]?\d+\.\d+)',
+            text,
+            re.S,
+        )
+        if not value_match:
+            return {}
+        return {
+            "value": parse_number(value_match.group(1)),
+            "change_pct": parse_number(value_match.group(3)),
+        }
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 def fetch_yahoo_fund_rows() -> dict[str, dict]:
@@ -206,7 +231,7 @@ def build_morning_message() -> str:
         "前日分の市場確認用です。",
         "",
     ]
-    for name in ["USD/JPY", "日経平均", "TOPIX ETF", "VIX", "S&P500", "NASDAQ100", "SOX", "Gold"]:
+    for name in ["USD/JPY", "日経平均", "TOPIX", "VIX", "S&P500", "NASDAQ100", "SOX", "Gold"]:
         row = market_rows.get(name, {})
         digits = 3 if name == "USD/JPY" else 2
         value = fmt_value(row.get("value"), digits=digits)
