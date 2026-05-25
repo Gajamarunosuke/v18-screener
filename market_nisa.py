@@ -75,7 +75,7 @@ FUND_LINKS = {
     "楽天S&P500": "https://finance.yahoo.co.jp/quote/9I31223A/history",
     "ニッセイNASDAQ100": "https://finance.yahoo.co.jp/quote/29313233/history",
     "ニッセイSOX": "https://finance.yahoo.co.jp/quote/29314233/history",
-    "ゴールドファンド": "https://finance.yahoo.co.jp/quote/03311112/history",
+    "ゴールドファンド": "https://finance.yahoo.co.jp/quote/02312177/history",
     "FANG+": "https://finance.yahoo.co.jp/quote/04311181/history",
     "野村世界半導体": "https://finance.yahoo.co.jp/quote/01313098/history",
 }
@@ -87,7 +87,7 @@ FUND_CODES = {
     "楽天S&P500": "9I31223A",
     "ニッセイNASDAQ100": "29313233",
     "ニッセイSOX": "29314233",
-    "ゴールドファンド": "03311112",
+    "ゴールドファンド": "02312177",
     "FANG+": "04311181",
     "野村世界半導体": "01313098",
 }
