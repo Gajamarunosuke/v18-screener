@@ -26,6 +26,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: 依存パッケージインストール
+        run: pip install -r requirements.txt
+
       - name: Post Market NISA memo
         env:
           DISCORD_WEBHOOK_MARKET_NISA: ${{ secrets.DISCORD_WEBHOOK_MARKET_NISA }}

@@ -55,6 +55,18 @@ MARKET_LINKS = {
 }
 
 
+MARKET_TICKERS = {
+    "USD/JPY": "JPY=X",
+    "日経平均": "^N225",
+    "TOPIX": "1306.T",
+    "VIX": "^VIX",
+    "S&P500": "^GSPC",
+    "NASDAQ100": "^NDX",
+    "SOX": "^SOX",
+    "Gold": "GC=F",
+}
+
+
 FUND_LINKS = {
     "eMAXIS Slim オルカン": "https://emaxis.am.mufg.jp/fund/253425.html",
     "楽天オルカン": "https://www.rakuten-toushin.co.jp/fund/nav/9I31223C/",
@@ -75,15 +87,59 @@ def today_label() -> str:
     return datetime.now(JST).strftime("%Y/%m/%d")
 
 
+def fmt_value(value: float | None, digits: int = 2) -> str:
+    if value is None:
+        return "--"
+    return f"{value:,.{digits}f}"
+
+
+def fmt_pct(value: float | None) -> str:
+    if value is None:
+        return "--%"
+    sign = "+" if value >= 0 else ""
+    return f"{sign}{value:.2f}%"
+
+
+def fetch_market_rows() -> dict[str, dict]:
+    try:
+        import yfinance as yf
+    except ModuleNotFoundError as exc:
+        return {name: {"error": str(exc)} for name in MARKET_TICKERS}
+
+    rows: dict[str, dict] = {}
+    for name, ticker in MARKET_TICKERS.items():
+        try:
+            hist = yf.download(ticker, period="5d", interval="1d", progress=False, auto_adjust=False)
+            if hist.empty or "Close" not in hist:
+                rows[name] = {}
+                continue
+            closes = hist["Close"].dropna()
+            if len(closes) < 1:
+                rows[name] = {}
+                continue
+            latest = float(closes.iloc[-1])
+            previous = float(closes.iloc[-2]) if len(closes) >= 2 else None
+            change_pct = ((latest / previous) - 1) * 100 if previous else None
+            rows[name] = {"value": latest, "change_pct": change_pct}
+        except Exception as exc:
+            rows[name] = {"error": str(exc)}
+    return rows
+
+
 def build_morning_message() -> str:
+    market_rows = fetch_market_rows()
     lines = [
         f"🌅朝の地合いメモ {today_label()}",
         "",
-        "前日分の市場確認用です。数値を入れて使います。",
+        "前日分の市場確認用です。",
         "",
     ]
     for name in ["USD/JPY", "日経平均", "TOPIX", "VIX", "S&P500", "NASDAQ100", "SOX", "Gold"]:
-        lines.append(f"{name} --（前日比 --%） {markdown_link('確認', MARKET_LINKS[name])}")
+        row = market_rows.get(name, {})
+        digits = 3 if name == "USD/JPY" else 2
+        value = fmt_value(row.get("value"), digits=digits)
+        change_pct = fmt_pct(row.get("change_pct"))
+        lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link('確認', MARKET_LINKS[name])}")
 
     lines.extend(
         [
