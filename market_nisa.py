@@ -46,7 +46,7 @@ WEBHOOK_ENV = "DISCORD_WEBHOOK_MARKET_NISA"
 MARKET_LINKS = {
     "USD/JPY": "https://www.google.com/finance/quote/USD-JPY",
     "日経平均": "https://www.google.com/finance/quote/NI225:INDEXNIKKEI",
-    "TOPIX": "https://www.google.com/finance/quote/TOPIX:INDEXTOPIX",
+    "TOPIX ETF": "https://www.google.com/finance/quote/TOPIX:INDEXTOPIX",
     "VIX": "https://www.google.com/finance/quote/VIX:INDEXCBOE",
     "S&P500": "https://www.google.com/finance/quote/.INX:INDEXSP",
     "NASDAQ100": "https://www.google.com/finance/quote/NDX:INDEXNASDAQ",
@@ -58,7 +58,7 @@ MARKET_LINKS = {
 MARKET_TICKERS = {
     "USD/JPY": "JPY=X",
     "日経平均": "^N225",
-    "TOPIX": "1306.T",
+    "TOPIX ETF": "1306.T",
     "VIX": "^VIX",
     "S&P500": "^GSPC",
     "NASDAQ100": "^NDX",
@@ -128,18 +128,21 @@ def fetch_market_rows() -> dict[str, dict]:
 
 def build_morning_message() -> str:
     market_rows = fetch_market_rows()
+    fetch_errors = []
     lines = [
         f"🌅朝の地合いメモ {today_label()}",
         "",
         "前日分の市場確認用です。",
         "",
     ]
-    for name in ["USD/JPY", "日経平均", "TOPIX", "VIX", "S&P500", "NASDAQ100", "SOX", "Gold"]:
+    for name in ["USD/JPY", "日経平均", "TOPIX ETF", "VIX", "S&P500", "NASDAQ100", "SOX", "Gold"]:
         row = market_rows.get(name, {})
         digits = 3 if name == "USD/JPY" else 2
         value = fmt_value(row.get("value"), digits=digits)
         change_pct = fmt_pct(row.get("change_pct"))
         lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link('確認', MARKET_LINKS[name])}")
+        if row.get("error") or value == "--":
+            fetch_errors.append(name)
 
     lines.extend(
         [
@@ -148,6 +151,8 @@ def build_morning_message() -> str:
             "VIX低下＋SOX強めならリスクオン寄り。日経平均とTOPIXの差で、大型寄りか全体地合いかを確認。",
         ]
     )
+    if fetch_errors:
+        lines.extend(["", f"未取得：{', '.join(fetch_errors)}"])
     return "\n".join(lines)
 
 
