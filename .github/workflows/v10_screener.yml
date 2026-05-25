@@ -3,7 +3,7 @@ name: V10 Screener
 on:
   schedule:
     # 月〜金 16:00 JST（UTC 07:00）
-    - cron: '18 8 * * *'
+    - cron: '5 7 * * 1-5'
   workflow_dispatch:
 
 jobs:
