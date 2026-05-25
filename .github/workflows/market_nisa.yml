@@ -1,0 +1,32 @@
+name: Market NISA Memo
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: morning or evening
+        required: true
+        default: evening
+        type: choice
+        options:
+          - morning
+          - evening
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Post Market NISA memo
+        env:
+          DISCORD_WEBHOOK_MARKET_NISA: ${{ secrets.DISCORD_WEBHOOK_MARKET_NISA }}
+        run: python market_nisa.py --mode "${{ inputs.mode }}" --post
