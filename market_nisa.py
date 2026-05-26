@@ -67,6 +67,12 @@ MARKET_TICKERS = {
 }
 
 
+YAHOO_INDEX_FALLBACK_TICKERS = {
+    "日経平均": "^N225",
+    "TOPIX": "^TOPX",
+}
+
+
 FUND_LINKS = {
     "eMAXIS Slim オルカン": "https://finance.yahoo.co.jp/quote/0331418A/history",
     "楽天オルカン": "https://finance.yahoo.co.jp/quote/9I31123A/history",
@@ -128,24 +134,31 @@ def fetch_market_rows() -> dict[str, dict]:
 
     rows: dict[str, dict] = {}
     for name, ticker in MARKET_TICKERS.items():
-        try:
-            hist = yf.Ticker(ticker).history(period="5d")
-            if hist.empty or "Close" not in hist.columns:
-                rows[name] = {}
-                continue
-            closes = hist["Close"].dropna()
-            if len(closes) < 1:
-                rows[name] = {}
-                continue
-            latest = float(closes.iloc[-1])
-            previous = float(closes.iloc[-2]) if len(closes) >= 2 else None
-            change_pct = ((latest / previous) - 1) * 100 if previous else None
-            rows[name] = {"value": latest, "change_pct": change_pct}
-        except Exception as exc:
-            rows[name] = {"error": str(exc)}
+        rows[name] = fetch_yfinance_market_row(yf, ticker)
     rows["日経平均"] = fetch_yahoo_index_row("998407.O")
     rows["TOPIX"] = fetch_yahoo_index_row("998405.T")
+    for name, ticker in YAHOO_INDEX_FALLBACK_TICKERS.items():
+        if not rows[name].get("value"):
+            fallback = fetch_yfinance_market_row(yf, ticker)
+            if fallback.get("value"):
+                rows[name] = fallback
     return rows
+
+
+def fetch_yfinance_market_row(yf, ticker: str) -> dict:
+    try:
+        hist = yf.Ticker(ticker).history(period="5d")
+        if hist.empty or "Close" not in hist.columns:
+            return {}
+        closes = hist["Close"].dropna()
+        if len(closes) < 1:
+            return {}
+        latest = float(closes.iloc[-1])
+        previous = float(closes.iloc[-2]) if len(closes) >= 2 else None
+        change_pct = ((latest / previous) - 1) * 100 if previous else None
+        return {"value": latest, "change_pct": change_pct}
+    except Exception as exc:
+        return {"error": str(exc)}
 
 
 def fetch_yahoo_index_row(code: str) -> dict:
