@@ -162,26 +162,24 @@ def fetch_yfinance_market_row(yf, ticker: str) -> dict:
 
 
 def fetch_yahoo_index_row(code: str) -> dict:
-    url = f"https://finance.yahoo.co.jp/quote/{code}"
+    # /history page is accessible from cloud IPs; /quote page may be blocked
+    url = f"https://finance.yahoo.co.jp/quote/{code}/history"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
             text = resp.read().decode("utf-8", errors="replace")
-        text = html.unescape(text)
-        value_match = re.search(
-            r'PriceBoard__price__1V0k.*?StyledNumber__value__3rXW">([\d,]+\.\d+)'
-            r'.*?PriceChangeLabel__primary__Y_ut.*?StyledNumber__value__3rXW">([+\-−][\d,]+\.\d+)'
-            r'.*?PriceChangeLabel__secondary__3BXI.*?StyledNumber__value__3rXW">([+\-−]?\d+\.\d+)',
+        text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+        rows = re.findall(
+            r'\d{4}年\s*\d{1,2}月\s*\d{1,2}日\s+([\d,]+\.\d+)',
             text,
-            re.S,
         )
-        if not value_match:
+        if len(rows) < 1:
             return {}
-        return {
-            "value": parse_number(value_match.group(1)),
-            "change_pct": parse_number(value_match.group(3)),
-        }
+        latest = parse_number(rows[0])
+        previous = parse_number(rows[1]) if len(rows) >= 2 else None
+        change_pct = ((latest / previous) - 1) * 100 if latest and previous else None
+        return {"value": latest, "change_pct": change_pct}
     except Exception as exc:
         return {"error": str(exc)}
 
