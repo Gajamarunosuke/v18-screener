@@ -162,23 +162,19 @@ def fetch_yfinance_market_row(yf, ticker: str) -> dict:
 
 
 def fetch_yahoo_index_row(code: str) -> dict:
-    # /history page is accessible from cloud IPs; /quote page may be blocked
-    url = f"https://finance.yahoo.co.jp/quote/{code}/history"
+    # ?format=json embeds full OHLC history; more reliable than scraping CSS classes
+    url = f"https://finance.yahoo.co.jp/quote/{code}?format=json"
     headers = {"User-Agent": "Mozilla/5.0"}
     try:
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=15) as resp:
             text = resp.read().decode("utf-8", errors="replace")
-        text = html.unescape(re.sub(r"<[^>]+>", " ", text))
-        rows = re.findall(
-            r'\d{4}年\s*\d{1,2}月\s*\d{1,2}日\s+([\d,]+\.\d+)',
-            text,
-        )
-        if len(rows) < 1:
+        closes = re.findall(r'"closePrice"\s*:\s*([\d.]+)', text)
+        if len(closes) < 2:
             return {}
-        latest = parse_number(rows[0])
-        previous = parse_number(rows[1]) if len(rows) >= 2 else None
-        change_pct = ((latest / previous) - 1) * 100 if latest and previous else None
+        latest = float(closes[-1])
+        previous = float(closes[-2])
+        change_pct = ((latest / previous) - 1) * 100 if previous else None
         return {"value": latest, "change_pct": change_pct}
     except Exception as exc:
         return {"error": str(exc)}
