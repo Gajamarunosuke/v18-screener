@@ -2,7 +2,7 @@ name: V10 Screener
 
 on:
   schedule:
-    # 月〜金 16:00 JST（UTC 07:00）
+    # 月〜金 16:05 JST（UTC 07:05）
     - cron: '5 7 * * 1-5'
   workflow_dispatch:
 
@@ -44,5 +44,6 @@ jobs:
           GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json \
           python v10_screener.py \
             --gsheet-id "$GSHEET_ID" \
-            --discord-webhook "$DISCORD_WEBHOOK"
+            --discord-webhook "$DISCORD_WEBHOOK_V10"
+
 
