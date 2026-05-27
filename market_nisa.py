@@ -278,12 +278,13 @@ def build_evening_message() -> str:
     for name in ["USD/JPY", "日経平均", "TOPIX"]:
         row = market_rows.get(name, {})
         digits = 3 if name == "USD/JPY" else 2
-        link_label = "G" if name == "USD/JPY" else "Y"
         value = fmt_value(row.get("value"), digits=digits)
         change_pct = fmt_pct(row.get("change_pct"))
-        lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link(link_label, MARKET_LINKS[name])}")
+        link_label, link_url = MARKET_LINKS[name]
+        lines.append(f"{name} {value}（前日比 {change_pct}） {markdown_link(link_label, link_url)}")
         if row.get("error") or value == "--":
             fetch_errors.append(name)
+
 
     lines.extend(["", "確定基準価額ベースの確認メモです。", "", "【保有・確認】"])
     for name in [
