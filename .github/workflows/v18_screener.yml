@@ -30,6 +30,22 @@ jobs:
           GSHEET_ID: ${{ secrets.GSHEET_ID }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
+          NOW_HM=$(TZ=Asia/Tokyo date +%H%M)
+          EVENT_NAME="${{ github.event_name }}"
+
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            if [ "$NOW_HM" -lt 1600 ] || [ "$NOW_HM" -gt 1630 ]; then
+              echo "Skip scheduled V18 run outside 16:00-16:30 JST. now=$NOW_HM"
+              exit 0
+            fi
+          fi
+
+          echo "$GCP_SA_KEY" > /tmp/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json \
+          python v18_screener.py \
+            --gsheet-id "$GSHEET_ID" \
+            --discord-webhook "$DISCORD_WEBHOOK"
+
           echo "$GCP_SA_KEY" > /tmp/sa.json
           GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json \
           python v18_screener.py \
