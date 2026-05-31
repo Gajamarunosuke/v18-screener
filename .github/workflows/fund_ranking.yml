@@ -1,0 +1,70 @@
+name: Market NISA Fund Ranking
+
+on:
+  schedule:
+    # 楽天証券ランキング更新後を優先。
+    # 週間: 月曜 08:15 JST = 日曜 23:15 UTC
+    - cron: '15 23 * * 0'
+    # 月間: 毎月1日 08:30 JST = 前月末日 23:30 UTC（28-31日のうち、JST日付が01の回だけ実行）
+    - cron: '30 23 28-31 * *'
+  workflow_dispatch:
+    inputs:
+      period:
+        description: 'ランキング期間'
+        required: true
+        default: 'weekly'
+        type: choice
+        options:
+          - weekly
+          - monthly
+
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python セットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 期間判定
+        id: period
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "period=${{ inputs.period }}" >> "$GITHUB_OUTPUT"
+            echo "should_run=true" >> "$GITHUB_OUTPUT"
+          else
+            hour="$(date -u +%H)"
+            minute="$(date -u +%M)"
+            jst_day="$(TZ=Asia/Tokyo date +%d)"
+            if [ "$hour:$minute" = "23:30" ]; then
+              # 月間: JST日付が毎月1日のときだけ実行（前月末日 23:30 UTC = 当月1日 08:30 JST）
+              echo "period=monthly" >> "$GITHUB_OUTPUT"
+              if [ "$jst_day" = "01" ]; then
+                echo "should_run=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "should_run=false" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              echo "period=weekly" >> "$GITHUB_OUTPUT"
+              echo "should_run=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: スキップ表示
+        if: steps.period.outputs.should_run != 'true'
+        run: echo "JST 1日ではないため月間ランキング投稿をスキップします。"
+
+      - name: 楽天証券NISA買付ランキングをDiscord投稿
+        if: steps.period.outputs.should_run == 'true'
+        env:
+          DISCORD_WEBHOOK_MARKET_NISA: ${{ secrets.DISCORD_WEBHOOK_MARKET_NISA }}
+          MARKET_NISA_WEBHOOK_URL: ${{ secrets.MARKET_NISA_WEBHOOK_URL }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python fund_ranking.py --period "${{ steps.period.outputs.period }}" --limit 10
