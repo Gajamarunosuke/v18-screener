@@ -129,7 +129,7 @@ def build_message(period: str, period_label: str, rows: Iterable[FundRank]) -> s
             "※人気ランキングであり、買い推奨ではありません。",
             "※最終的な投資判断はご自身でお願いします。",
             "",
-            f"出典：{RAKUTEN_RANKING_URL}?type={RAKUTEN_NISA_BUY_AMOUNT_TYPE}",
+            "出典：楽天証券",
         ]
     )
     return "\n".join(lines)
