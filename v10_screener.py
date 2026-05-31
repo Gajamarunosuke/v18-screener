@@ -11,6 +11,7 @@ V10 = MaaSwing Hybrid Tool v14 のエントリー条件
 
 import os
 import json
+import unicodedata
 import urllib.request
 from pathlib import Path
 from datetime import datetime
@@ -20,6 +21,24 @@ import yfinance as yf
 import pytz
 
 _JST = pytz.timezone("Asia/Tokyo")
+
+
+def display_width(text: str) -> int:
+    return sum(2 if unicodedata.east_asian_width(ch) in {"F", "W", "A"} else 1 for ch in str(text))
+
+
+def fit_display(text: str, width: int, align: str = "<") -> str:
+    text = str(text)
+    clipped = ""
+    used = 0
+    for ch in text:
+        ch_width = 2 if unicodedata.east_asian_width(ch) in {"F", "W", "A"} else 1
+        if used + ch_width > width:
+            break
+        clipped += ch
+        used += ch_width
+    pad = " " * max(width - used, 0)
+    return pad + clipped if align == ">" else clipped + pad
 
 try:
     import gspread
@@ -279,11 +298,22 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
             if idx == 0
             else f"**V10スクリーナー {today}** ({idx + 1}/{len(chunks)})"
         )
-        rows = [f"{'コード':<6} {'銘柄名':<10} {'終値':>6} {'近接':<4} {'週足'}", "-" * 37]
+        rows = [
+            f"{fit_display('Code', 6)} {fit_display('Name', 18)} {fit_display('Close', 7, '>')} {fit_display('Dist', 6, '>')} {fit_display('Near', 4)} {fit_display('Weekly', 6)}",
+            "-" * 54,
+        ]
         for r in chunk:
-            name   = r.get("name", "")[:8]
-            w_mark = "上昇" if r["weekly_up"] else "---"
-            rows.append(f"{r['code']:<6} {name:<10} {r['close']:>6.0f} {r['near']:<4} {w_mark}")
+            w_mark = "Up" if r["weekly_up"] else "---"
+            close_text = f"{r['close']:.0f}"
+            dist_text = f"{r['dist_m']:.2f}%"
+            rows.append(
+                f"{fit_display(r['code'], 6)} "
+                f"{fit_display(r.get('name', ''), 18)} "
+                f"{fit_display(close_text, 7, '>')} "
+                f"{fit_display(dist_text, 6, '>')} "
+                f"{fit_display(r['near'], 4)} "
+                f"{fit_display(w_mark, 6)}"
+            )
         _post("\n".join([header, "```", *rows, "```"]))
 
     print(f"[V10] Discord通知送信完了 ({len(chunks)}メッセージ)")
