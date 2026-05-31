@@ -1,0 +1,35 @@
+name: US V18 Daily Watch
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 07:05 JST, Tuesday-Saturday. Runs after the US market close.
+    - cron: '5 22 * * 1-5'
+
+jobs:
+  us-v18:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run US V18 screener
+        env:
+          TZ: Asia/Tokyo
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          DISCORD_WEBHOOK_WORKSPACE_US: ${{ secrets.DISCORD_WEBHOOK_WORKSPACE_US }}
+          DISCORD_WEBHOOK_US_WATCH: ${{ secrets.DISCORD_WEBHOOK_US_WATCH }}
+          US_WORKSPACE_CHANNEL_ID: ${{ secrets.US_WORKSPACE_CHANNEL_ID }}
+          US_WATCH_POST_CHANNEL_ID: ${{ secrets.US_WATCH_POST_CHANNEL_ID }}
+        run: python v18_screener_us.py --post

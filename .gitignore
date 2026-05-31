@@ -5,6 +5,9 @@ secrets/
 
 # キャッシュ・データ
 data/
+.deps/
+.yf_cache/
+us_watch_output/
 __pycache__/
 *.pyc
 *.xls

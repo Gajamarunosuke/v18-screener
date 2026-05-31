@@ -1,5 +1,7 @@
 yfinance
 pandas
+python-dotenv
+lxml
 gspread
 google-auth
 pytz
