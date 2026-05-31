@@ -108,7 +108,7 @@ def parse_ranking(html_text: str, limit: int) -> tuple[str, list[FundRank]]:
 def build_message(period: str, period_label: str, rows: Iterable[FundRank]) -> str:
     period_name = "月間" if period == "monthly" else "週間"
     lines = [
-        f"📊投信ランキングメモ {period_name} {datetime.now().strftime('%Y/%m/%d')}",
+        f"📊NISA買付ランキングメモ {period_name} {datetime.now().strftime('%Y/%m/%d')}",
         "",
         "楽天証券 NISA投資信託 買付金額ランキング",
         f"集計期間：{period_label}",
