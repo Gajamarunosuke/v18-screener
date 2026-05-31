@@ -6,6 +6,7 @@ secrets/
 # キャッシュ・データ
 data/
 .deps/
+.secret_deps/
 .yf_cache/
 us_watch_output/
 __pycache__/
