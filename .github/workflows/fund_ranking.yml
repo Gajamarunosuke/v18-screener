@@ -11,6 +11,9 @@ on:
         options:
           - weekly
           - monthly
+  schedule:
+    # Monthly ranking is updated after month-end; run on the 1st at 18:10 JST.
+    - cron: '10 9 1 * *'
 
 jobs:
   ranking:
@@ -29,4 +32,5 @@ jobs:
       - name: 楽天証券NISA買付ランキングをDiscord投稿
         env:
           DISCORD_WEBHOOK_MARKET_NISA: ${{ secrets.DISCORD_WEBHOOK_MARKET_NISA }}
-        run: python fund_ranking.py --period "${{ inputs.period }}" --limit 10
+          RANKING_PERIOD: ${{ github.event_name == 'schedule' && 'monthly' || inputs.period }}
+        run: python fund_ranking.py --period "$RANKING_PERIOD" --limit 10
