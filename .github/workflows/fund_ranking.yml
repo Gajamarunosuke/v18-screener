@@ -11,9 +11,6 @@ on:
         options:
           - weekly
           - monthly
-  schedule:
-    # Monthly ranking is updated after month-end; run on the 1st at 18:10 JST.
-    - cron: '10 9 1 * *'
 
 jobs:
   ranking:

@@ -1,10 +1,7 @@
 name: V10 Screener
 
 on:
-  schedule:
-    # 月〜金 16:05 JST（UTC 07:05）
-    - cron: '5 7 * * 1-5'
-  workflow_dispatch:
+  workflow_dispatch:  # 定期実行は cron-job.org から dispatch
 
 jobs:
   screener:
