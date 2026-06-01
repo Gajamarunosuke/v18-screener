@@ -330,18 +330,18 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
             else f"**V18スクリーナー {today}** ({idx + 1}/{len(chunks)})"
         )
         rows = [
-            f"{fit_display('Code', 6)} {fit_display('Name', 18)} {fit_display('Close', 7, '>')} {fit_display('Dist', 6, '>')} {fit_display('Near', 4)}",
+            f"{'Code':<6} {'Close':>7} {'Dist':>6} {'Near':<4} Name",
             "-" * 47,
         ]
         for r in chunk:
             close_text = f"{r['close']:.0f}"
             dist_text = f"{r['dist_m']:.2f}%"
             rows.append(
-                f"{fit_display(r['code'], 6)} "
-                f"{fit_display(r.get('name', ''), 18)} "
-                f"{fit_display(close_text, 7, '>')} "
-                f"{fit_display(dist_text, 6, '>')} "
-                f"{fit_display(r['near'], 4)}"
+                f"{r['code']:<6} "
+                f"{close_text:>7} "
+                f"{dist_text:>6} "
+                f"{r['near']:<4} "
+                f"{r.get('name', '')}"
             )
         _post("\n".join([header, "```", *rows, "```"]))
 
