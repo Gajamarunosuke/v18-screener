@@ -1,10 +1,7 @@
 name: US V18 Daily Watch
 
 on:
-  workflow_dispatch:
-  schedule:
-    # 07:05 JST, Tuesday-Saturday. Runs after the US market close.
-    - cron: '5 22 * * 1-5'
+  workflow_dispatch:  # 定期実行は cron-job.org から dispatch（UTC 月-金 22:05 = JST 火-土 07:05）
 
 jobs:
   us-v18:
