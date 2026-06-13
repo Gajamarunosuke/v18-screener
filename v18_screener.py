@@ -14,7 +14,6 @@ import os
 import json
 import unicodedata
 import urllib.request
-import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -26,6 +25,7 @@ from sector_heatmap import (
     aggregate_sector_history,
     load_jpx_sector_map,
     render_sector_heatmap,
+    send_discord_image,
 )
 
 _JST = pytz.timezone("Asia/Tokyo")
@@ -355,42 +355,6 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
     print(f"[V18] Discord通知送信完了 ({len(chunks)}メッセージ)")
 
 
-def send_discord_image(webhook_url: str, image_path: Path) -> None:
-    boundary = f"----V18Heatmap{uuid.uuid4().hex}"
-    payload = json.dumps(
-        {"content": "**V18 業種シグナル・ヒートマップ（直近10営業日）**"},
-        ensure_ascii=False,
-    ).encode("utf-8")
-    image = image_path.read_bytes()
-
-    parts = [
-        f"--{boundary}\r\n".encode(),
-        b'Content-Disposition: form-data; name="payload_json"\r\n',
-        b"Content-Type: application/json; charset=utf-8\r\n\r\n",
-        payload,
-        b"\r\n",
-        f"--{boundary}\r\n".encode(),
-        (
-            f'Content-Disposition: form-data; name="files[0]"; '
-            f'filename="{image_path.name}"\r\n'
-        ).encode(),
-        b"Content-Type: image/png\r\n\r\n",
-        image,
-        b"\r\n",
-        f"--{boundary}--\r\n".encode(),
-    ]
-    request = urllib.request.Request(
-        webhook_url,
-        data=b"".join(parts),
-        headers={
-            "Content-Type": f"multipart/form-data; boundary={boundary}",
-            "User-Agent": "DiscordBot (https://github.com, 1.0)",
-        },
-    )
-    urllib.request.urlopen(request, timeout=30)
-    print(f"[V18] Discordヒートマップ送信完了: {image_path}")
-
-
 # ── Google Spreadsheet出力 ────────────────────────────────────────────────────
 
 def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> tuple[str, list[list[str]]]:
@@ -504,7 +468,11 @@ def main():
         send_discord(webhook, results)
         if heatmap_path:
             try:
-                send_discord_image(webhook, heatmap_path)
+                send_discord_image(
+                    webhook,
+                    heatmap_path,
+                    "**V18 業種シグナル・ヒートマップ（直近10営業日）**",
+                )
             except Exception as exc:
                 print(f"[V18] ヒートマップ投稿に失敗（一覧投稿は完了）: {exc}")
 

@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from v18_screener import send_discord_image
+from sector_heatmap import send_discord_image
 
 
 class DiscordImageTests(unittest.TestCase):

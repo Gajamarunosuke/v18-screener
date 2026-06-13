@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import urllib.request
+import uuid
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -241,3 +244,41 @@ def render_sector_heatmap(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     image.save(output_path, "PNG", optimize=True)
     return output_path
+
+
+def send_discord_image(
+    webhook_url: str,
+    image_path: Path,
+    content: str = "**業種シグナル・ヒートマップ（直近10営業日）**",
+) -> None:
+    """ヒートマップPNGをDiscordへmultipartで添付投稿する（V10/V18/US共通）。"""
+    boundary = f"----Heatmap{uuid.uuid4().hex}"
+    payload = json.dumps({"content": content}, ensure_ascii=False).encode("utf-8")
+    image = image_path.read_bytes()
+
+    parts = [
+        f"--{boundary}\r\n".encode(),
+        b'Content-Disposition: form-data; name="payload_json"\r\n',
+        b"Content-Type: application/json; charset=utf-8\r\n\r\n",
+        payload,
+        b"\r\n",
+        f"--{boundary}\r\n".encode(),
+        (
+            f'Content-Disposition: form-data; name="files[0]"; '
+            f'filename="{image_path.name}"\r\n'
+        ).encode(),
+        b"Content-Type: image/png\r\n\r\n",
+        image,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    request = urllib.request.Request(
+        webhook_url,
+        data=b"".join(parts),
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "DiscordBot (https://github.com, 1.0)",
+        },
+    )
+    urllib.request.urlopen(request, timeout=30)
+    print(f"[heatmap] Discord画像送信完了: {image_path}")

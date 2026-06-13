@@ -20,6 +20,13 @@ import pandas as pd
 import yfinance as yf
 import pytz
 
+from sector_heatmap import (
+    aggregate_sector_history,
+    load_jpx_sector_map,
+    render_sector_heatmap,
+    send_discord_image,
+)
+
 _JST = pytz.timezone("Asia/Tokyo")
 
 
@@ -321,15 +328,15 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
 
 # ── Google Spreadsheet出力 ────────────────────────────────────────────────────
 
-def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> None:
+def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> list[list[str]]:
     if not _GSPREAD_OK:
         print("[V10] gspread未インストール。pip install gspread google-auth を実行してください。")
-        return
+        return []
 
     creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
     if not creds_path or not Path(creds_path).exists():
         print(f"[V10] GOOGLE_APPLICATION_CREDENTIALS が未設定または存在しません: {creds_path!r}")
-        return
+        return []
 
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -376,8 +383,10 @@ def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> None:
 
     hist_rows = [[today, run_time] + row for row in (data_rows if data_rows else [["本日の候補なし"]])]
     hist.append_rows(hist_rows, value_input_option="USER_ENTERED")
+    history_values = hist.get_all_values()
 
     print(f"[V10] Spreadsheet更新完了（最新+履歴）")
+    return history_values
 
 
 # ── メイン ───────────────────────────────────────────────────────────────────
@@ -404,12 +413,34 @@ def main():
     results = run_screener(refresh_jpx=auto_refresh)
     save_report(results)
 
+    history_rows = []
     if args.gsheet_id:
-        save_to_gsheet(results, args.gsheet_id)
+        history_rows = save_to_gsheet(results, args.gsheet_id)
+
+    heatmap_path = None
+    if history_rows:
+        try:
+            sector_map = load_jpx_sector_map(JPX_CACHE)
+            heatmap = aggregate_sector_history(history_rows, sector_map)
+            if heatmap.dates:
+                heatmap_path = OBSIDIAN_DIR / f"{heatmap.dates[-1]}_v10_sector_heatmap.png"
+                render_sector_heatmap(heatmap, heatmap_path, title="V10 業種シグナル・ヒートマップ")
+                print(f"[V10] ヒートマップ生成完了: {heatmap_path}")
+        except Exception as exc:
+            print(f"[V10] ヒートマップ生成をスキップ: {exc}")
 
     webhook = args.discord_webhook or os.environ.get("DISCORD_WEBHOOK_V10", "")
     if webhook:
         send_discord(webhook, results)
+        if heatmap_path:
+            try:
+                send_discord_image(
+                    webhook,
+                    heatmap_path,
+                    "**V10 業種シグナル・ヒートマップ（直近10営業日）**",
+                )
+            except Exception as exc:
+                print(f"[V10] ヒートマップ投稿に失敗（一覧投稿は完了）: {exc}")
 
     print(f"\n完了: {len(results)}銘柄ヒット")
     return results
