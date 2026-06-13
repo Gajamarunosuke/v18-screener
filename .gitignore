@@ -15,6 +15,7 @@ __pycache__/
 *.xlsx
 
 # ログ・出力
+output/
 *.log
 *.md.bak
 

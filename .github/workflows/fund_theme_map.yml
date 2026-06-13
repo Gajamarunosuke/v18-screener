@@ -23,8 +23,14 @@ jobs:
           sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
           pip install -r requirements.txt
 
-      - name: Post fund theme map
+      - name: Post fund theme and flow maps
         env:
           TZ: Asia/Tokyo
           DISCORD_WEBHOOK_MARKET_NISA: ${{ secrets.DISCORD_WEBHOOK_MARKET_NISA }}
-        run: python fund_theme_map.py --post
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          python fund_theme_map.py --post
+          echo "$GCP_SA_KEY" > /tmp/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json \
+          python fund_flow_map.py --gsheet-id "$GSHEET_ID" --post

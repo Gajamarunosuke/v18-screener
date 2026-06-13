@@ -112,6 +112,42 @@ class AggregateSectorHistoryTests(unittest.TestCase):
         self.assertEqual(hm.ratios, {})
         self.assertEqual(hm.denominators, {})
 
+    def test_calculates_streak_from_latest_trading_day(self):
+        rows = [
+            ["日付", "コード"],
+            ["2026-06-09", "1001"],
+            ["2026-06-10", "1001"],
+            ["2026-06-10", "2001"],
+            ["2026-06-11", "1001"],
+            ["2026-06-12", "1001"],
+            ["2026-06-12", "2001"],
+        ]
+        sector_map = {
+            "1001": "銀行業",
+            "2001": "小売業",
+        }
+
+        hm = aggregate_sector_history(rows, sector_map)
+
+        self.assertEqual(hm.streaks["銀行業"], 4)
+        self.assertEqual(hm.streaks["小売業"], 1)
+
+    def test_streak_is_zero_when_sector_is_not_lit_on_latest_day(self):
+        rows = [
+            ["日付", "コード"],
+            ["2026-06-11", "1001"],
+            ["2026-06-12", "2001"],
+        ]
+        sector_map = {
+            "1001": "銀行業",
+            "2001": "小売業",
+        }
+
+        hm = aggregate_sector_history(rows, sector_map)
+
+        self.assertEqual(hm.streaks["銀行業"], 0)
+        self.assertEqual(hm.streaks["小売業"], 1)
+
     def test_us_symbols_with_custom_normalizer_and_header(self):
         from sector_heatmap import normalize_us_symbol
 

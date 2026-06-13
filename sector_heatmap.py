@@ -25,6 +25,8 @@ class SectorHeatmap:
     # ハイブリッド用（母数を渡したときのみ埋まる。空なら従来の絶対数モード）
     denominators: dict[str, int] = field(default_factory=dict)
     ratios: dict[str, list[float]] = field(default_factory=dict)
+    # 各業種が最新日から何営業日連続で点灯中か（テーマ持続性）
+    streaks: dict[str, int] = field(default_factory=dict)
 
 
 def load_jpx_sector_map(jpx_path: Path) -> dict[str, str]:
@@ -139,6 +141,14 @@ def aggregate_sector_history(
         sector: [counter.get(sector, 0) for counter in daily_counters]
         for sector in sectors
     }
+    streaks: dict[str, int] = {}
+    for sector in sectors:
+        streak = 0
+        for count in reversed(counts[sector]):
+            if count < 1:
+                break
+            streak += 1
+        streaks[sector] = streak
 
     if hybrid:
         ratios = {
@@ -171,6 +181,7 @@ def aggregate_sector_history(
         daily_leaders=leaders,
         denominators=denominators,
         ratios=ratios,
+        streaks=streaks,
     )
 
 
@@ -246,6 +257,7 @@ def render_sector_heatmap(
         "header": ImageFont.truetype(bold, 19),
         "card": ImageFont.truetype(bold, 16),
         "label": ImageFont.truetype(regular, 18),
+        "streak": ImageFont.truetype(bold, 13),
         "count": ImageFont.truetype(bold, 24),
         "small": ImageFont.truetype(regular, 14),
     }
@@ -296,6 +308,16 @@ def render_sector_heatmap(
         if row_index % 2 == 0:
             draw.rectangle((left, y0, left + label_width, y0 + row_height - 2), fill=panel)
         draw.text((left + 10, y0 + 12), sector, font=fonts["label"], fill=text)
+        streak = heatmap.streaks.get(sector, 0)
+        if streak >= 2:
+            streak_label = f"{streak}日連続"
+            streak_box = draw.textbbox((0, 0), streak_label, font=fonts["streak"])
+            draw.text(
+                (left + label_width - (streak_box[2] - streak_box[0]) - 10, y0 + 15),
+                streak_label,
+                font=fonts["streak"],
+                fill=accent,
+            )
 
         for column_index, value in enumerate(heatmap.counts[sector]):
             x0 = left + label_width + column_index * cell_width
