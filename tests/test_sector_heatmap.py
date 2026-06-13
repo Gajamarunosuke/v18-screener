@@ -112,6 +112,34 @@ class AggregateSectorHistoryTests(unittest.TestCase):
         self.assertEqual(hm.ratios, {})
         self.assertEqual(hm.denominators, {})
 
+    def test_us_symbols_with_custom_normalizer_and_header(self):
+        from sector_heatmap import normalize_us_symbol
+
+        rows = [
+            ["日付", "Symbol"],
+            ["2026-06-12", "AAPL"],
+            ["2026-06-12", "MMM"],    # 3文字: zfill(4)で壊れてはいけない
+            ["2026-06-12", "BRK.B"],  # ドット→ハイフン正規化が必要
+        ]
+        sector_map = {
+            "AAPL": "Information Technology",
+            "MMM": "Industrials",
+            "BRK-B": "Financials",
+        }
+        denominators = {"Information Technology": 72, "Industrials": 80, "Financials": 76}
+
+        hm = aggregate_sector_history(
+            rows, sector_map,
+            sector_denominators=denominators,
+            code_normalizer=normalize_us_symbol,
+            code_header="Symbol",
+        )
+
+        self.assertEqual(hm.daily_totals, [3])
+        self.assertEqual(set(hm.sectors), {"Information Technology", "Industrials", "Financials"})
+        self.assertEqual(hm.counts["Financials"][0], 1)   # BRK.B→BRK-B が一致
+        self.assertEqual(hm.counts["Industrials"][0], 1)  # MMM がzfillで壊れていない
+
     def test_renders_hybrid_png(self):
         hm = aggregate_sector_history(
             [

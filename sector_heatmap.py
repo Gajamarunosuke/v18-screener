@@ -4,6 +4,7 @@ import json
 import urllib.request
 import uuid
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +50,16 @@ def load_jpx_sector_totals(jpx_path: Path, market_keyword: str = "プライム")
     return dict(totals)
 
 
+def _normalize_jp_code(value: object) -> str:
+    """日本株コード: 末尾の小数表記を落として4桁ゼロ詰め（例 8306.0 → 8306）。"""
+    return str(value).strip().split(".")[0].zfill(4)
+
+
+def normalize_us_symbol(value: object) -> str:
+    """米国ティッカー: 大文字化し、Wikipedia形式 BRK.B を yfinance形式 BRK-B に揃える。"""
+    return str(value).strip().upper().replace(".", "-")
+
+
 def _normalize_date(value: object) -> str:
     text = str(value).strip()
     for pattern in ("%Y-%m-%d", "%Y/%m/%d", "%Y-%m-%d %H:%M:%S"):
@@ -65,14 +76,18 @@ def aggregate_sector_history(
     max_days: int = 10,
     max_sectors: int = 15,
     sector_denominators: dict[str, int] | None = None,
+    code_normalizer: Callable[[object], str] | None = None,
+    date_header: str = "日付",
+    code_header: str = "コード",
 ) -> SectorHeatmap:
     if not rows:
         return SectorHeatmap([], [], [], {}, [])
 
+    normalize = code_normalizer or _normalize_jp_code
     headers = [str(value).strip() for value in rows[0]]
     try:
-        date_index = headers.index("日付")
-        code_index = headers.index("コード")
+        date_index = headers.index(date_header)
+        code_index = headers.index(code_header)
     except ValueError:
         return SectorHeatmap([], [], [], {}, [])
 
@@ -84,7 +99,7 @@ def aggregate_sector_history(
         date = _normalize_date(row[date_index])
         if date:
             observed_dates.add(date)
-        code = str(row[code_index]).strip().split(".")[0].zfill(4)
+        code = normalize(row[code_index])
         if date and code in sector_map:
             codes_by_date[date].add(code)
 

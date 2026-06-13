@@ -6,7 +6,7 @@ on:
 jobs:
   us-v18:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -18,7 +18,10 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk fonts-noto-cjk-extra
+          pip install -r requirements.txt
 
       - name: Run US V18 screener
         env:
@@ -29,4 +32,9 @@ jobs:
           DISCORD_WEBHOOK_US_WATCH: ${{ secrets.DISCORD_WEBHOOK_US_WATCH }}
           US_WORKSPACE_CHANNEL_ID: ${{ secrets.US_WORKSPACE_CHANNEL_ID }}
           US_WATCH_POST_CHANNEL_ID: ${{ secrets.US_WATCH_POST_CHANNEL_ID }}
-        run: python v18_screener_us.py --post
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          echo "$GCP_SA_KEY" > /tmp/sa.json
+          GOOGLE_APPLICATION_CREDENTIALS=/tmp/sa.json \
+          python v18_screener_us.py --post --gsheet-id "$GSHEET_ID"

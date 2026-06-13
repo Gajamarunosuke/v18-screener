@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import urllib.request
+from collections import Counter
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -22,6 +23,20 @@ if LOCAL_DEPS.exists():
 import pandas as pd
 import yfinance as yf
 from dotenv import load_dotenv
+
+from sector_heatmap import (
+    aggregate_sector_history,
+    normalize_us_symbol,
+    render_sector_heatmap,
+    send_discord_image,
+)
+
+try:
+    import gspread
+    from google.oauth2.service_account import Credentials as SACredentials
+    _GSPREAD_OK = True
+except ImportError:
+    _GSPREAD_OK = False
 
 
 YF_CACHE_DIR = BASE_DIR / ".yf_cache"
@@ -52,6 +67,8 @@ CHUNK = 50
 
 NASDAQ100_WIKI = "https://en.wikipedia.org/wiki/Nasdaq-100"
 NASDAQ100_FILE = BASE_DIR / "nasdaq100.txt"
+SP500_WIKI = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+SP500_FILE = BASE_DIR / "sp500.txt"
 WORKSPACE_WEBHOOK_ENV = "DISCORD_WEBHOOK_WORKSPACE_US"
 WORKSPACE_CHANNEL_ENV = "US_WORKSPACE_CHANNEL_ID"
 WORKSPACE_CHANNEL_NAME = "workspace-us"
@@ -221,12 +238,86 @@ def load_nasdaq100(refresh: bool = False) -> dict[str, str]:
     return FALLBACK_NASDAQ100
 
 
-def load_symbols(args: argparse.Namespace) -> dict[str, str]:
+def read_sp500_file(path: Path) -> tuple[dict[str, str], dict[str, str]]:
+    symbols: dict[str, str] = {}
+    sectors: dict[str, str] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip() or line.startswith("#"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        symbol = normalize_us_symbol(parts[0])
+        sectors[symbol] = parts[1].strip()
+        symbols[symbol] = parts[2].strip() or symbol
+    return symbols, sectors
+
+
+def write_sp500_file(path: Path, symbols: dict[str, str], sectors: dict[str, str]) -> None:
+    lines = [
+        "# Static S&P500 universe for US V18 daily watch.",
+        "# Format: SYMBOL<TAB>GICS Sector<TAB>Name",
+    ]
+    for symbol in sorted(symbols):
+        lines.append(f"{symbol}\t{sectors.get(symbol, '')}\t{symbols[symbol]}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def load_sp500(refresh: bool = False) -> tuple[dict[str, str], dict[str, str]]:
+    """S&P500の (symbol→name, symbol→GICS Sector) を返す。静的ファイル優先・無ければWikipedia取得。"""
+    if SP500_FILE.exists() and not refresh:
+        symbols, sectors = read_sp500_file(SP500_FILE)
+        if symbols:
+            print(f"[US V18] S&P500 static file: {len(symbols)} symbols")
+            return symbols, sectors
+
+    try:
+        request = urllib.request.Request(
+            SP500_WIKI,
+            headers={"User-Agent": "Mozilla/5.0 (MaaSwing-US-V18)"},
+        )
+        with urllib.request.urlopen(request, timeout=25) as response:
+            html = response.read().decode("utf-8", errors="replace")
+        tables = pd.read_html(io.StringIO(html))
+        for df in tables:
+            cols = {str(col).strip().lower(): col for col in df.columns}
+            symbol_col = cols.get("symbol") or cols.get("ticker")
+            name_col = cols.get("security")
+            sector_col = cols.get("gics sector")
+            if symbol_col is None or sector_col is None or name_col is None:
+                continue
+            rows = df[[symbol_col, name_col, sector_col]].dropna()
+            symbols: dict[str, str] = {}
+            sectors: dict[str, str] = {}
+            for _, row in rows.iterrows():
+                symbol = normalize_us_symbol(row[symbol_col])
+                symbols[symbol] = str(row[name_col]).strip()
+                sectors[symbol] = str(row[sector_col]).strip()
+            if len(symbols) >= 400:
+                print(f"[US V18] S&P500: {len(symbols)} symbols")
+                write_sp500_file(SP500_FILE, symbols, sectors)  # 取得できたら必ずキャッシュ
+                return symbols, sectors
+    except Exception as exc:
+        print(f"[US V18] S&P500 list fetch failed: {type(exc).__name__}: {exc}")
+
+    if SP500_FILE.exists():
+        symbols, sectors = read_sp500_file(SP500_FILE)
+        if symbols:
+            print(f"[US V18] S&P500 fallback to static file: {len(symbols)} symbols")
+            return symbols, sectors
+    raise SystemExit("S&P500 universe could not be loaded (no cache and fetch failed).")
+
+
+def load_universe(args: argparse.Namespace) -> tuple[dict[str, str], dict[str, str]]:
+    """(symbols{sym→name}, sectors{sym→GICS Sector}) を返す。sectorsはS&P500時のみ埋まる。"""
     if args.symbols:
-        return {symbol.strip().upper(): symbol.strip().upper() for symbol in args.symbols.split(",") if symbol.strip()}
+        syms = {s.strip().upper(): s.strip().upper() for s in args.symbols.split(",") if s.strip()}
+        return syms, {}
     if args.symbols_file:
-        return read_symbols_file(Path(args.symbols_file))
-    return load_nasdaq100(refresh=args.refresh_universe)
+        return read_symbols_file(Path(args.symbols_file)), {}
+    if args.universe == "sp500":
+        return load_sp500(refresh=args.refresh_universe)
+    return load_nasdaq100(refresh=args.refresh_universe), {}
 
 
 def fetch_batch(tickers: list[str], period: str, interval: str) -> pd.DataFrame:
@@ -497,12 +588,111 @@ def send_to_discord(results: list[dict], universe: str, targets: list[str]) -> N
         raise SystemExit("Discord notification failed: " + " / ".join(failures))
 
 
+HEATMAP_CONTENT = "**US 業種シグナル・ヒートマップ（直近10営業日）**"
+
+
+def save_to_gsheet_us(
+    results: list[dict],
+    sectors: dict[str, str],
+    spreadsheet_id: str,
+) -> list[list[str]]:
+    """US V18結果を gsheet の US_最新 / US_履歴 に書き込み、履歴の全行を返す。"""
+    if not _GSPREAD_OK:
+        print("[US V18] gspread未インストール。pip install gspread google-auth が必要。")
+        return []
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    if not creds_path or not Path(creds_path).exists():
+        print(f"[US V18] GOOGLE_APPLICATION_CREDENTIALS が未設定/不在: {creds_path!r}")
+        return []
+
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    creds = SACredentials.from_service_account_file(creds_path, scopes=scopes)
+    gc = gspread.authorize(creds)
+    sh = gc.open_by_key(spreadsheet_id)
+
+    today = datetime.now(JST).strftime("%Y-%m-%d")
+    run_time = datetime.now(JST).strftime("%H:%M")
+    headers = ["Symbol", "Name", "Close", "MA5", "MA20", "MA60", "MA距離(%)", "近接", "Sector", "Vol20"]
+
+    data_rows = []
+    for r in sorted(results, key=lambda x: x["dist_m"]):
+        data_rows.append([
+            r["code"], r["name"], r["close"], r["ma5"], r["ma20"], r["ma60"],
+            r["dist_m"], r["near"], sectors.get(r["code"], ""), r["vol20"],
+        ])
+
+    # ── 「US_最新」シート（常に上書き）──
+    try:
+        latest = sh.worksheet("US_最新")
+        latest.clear()
+    except gspread.exceptions.WorksheetNotFound:
+        latest = sh.add_worksheet(title="US_最新", rows=600, cols=12)
+    latest.update(
+        [[f"US V18 {today} {run_time} 実行 / {len(results)}銘柄ヒット"]] +
+        [headers] +
+        (data_rows if data_rows else [["本日の候補なし"]]),
+        value_input_option="USER_ENTERED",
+    )
+
+    # ── 「US_履歴」シート（末尾追記）──
+    hist_headers = ["日付", "実行時刻"] + headers
+    try:
+        hist = sh.worksheet("US_履歴")
+    except gspread.exceptions.WorksheetNotFound:
+        hist = sh.add_worksheet(title="US_履歴", rows=10000, cols=14)
+        hist.append_row(hist_headers)
+    hist_rows = [[today, run_time] + row for row in (data_rows if data_rows else [["本日の候補なし"]])]
+    hist.append_rows(hist_rows, value_input_option="USER_ENTERED")
+    history_values = hist.get_all_values()
+
+    print("[US V18] Spreadsheet更新完了（US_最新 + US_履歴）")
+    return history_values
+
+
+def send_heatmap_to_targets(image_path: Path, targets: list[str]) -> None:
+    """ヒートマップ画像をwebhook経由でtargetへ投稿（webhook未設定のtargetはスキップ）。"""
+    webhook_envs = {"workspace": WORKSPACE_WEBHOOK_ENV, "uswatch": US_WATCH_WEBHOOK_ENV}
+    for target in targets:
+        webhook_url = os.getenv(webhook_envs.get(target, ""), "")
+        if not webhook_url:
+            print(f"[US V18] heatmap skipped for {target}: webhook未設定")
+            continue
+        try:
+            send_discord_image(webhook_url, image_path, HEATMAP_CONTENT)
+        except Exception as exc:
+            print(f"[US V18] heatmap post failed for {target}: {type(exc).__name__}: {exc}")
+
+
+def build_us_heatmap(history_rows: list[list[str]], sectors: dict[str, str]) -> Path | None:
+    """US_履歴とGICSセクターからハイブリッドUS heatmapを生成しPNGパスを返す（不可ならNone）。"""
+    if not history_rows or not sectors:
+        return None
+    denominators = dict(Counter(sectors.values()))
+    heatmap = aggregate_sector_history(
+        history_rows,
+        sectors,
+        sector_denominators=denominators,
+        code_normalizer=normalize_us_symbol,
+        code_header="Symbol",
+    )
+    if not heatmap.dates:
+        return None
+    output = OUTPUT_DIR / f"{heatmap.dates[-1]}_v18_us_sector_heatmap.png"
+    render_sector_heatmap(heatmap, output, title="US 業種シグナル・ヒートマップ")
+    print(f"[US V18] heatmap生成完了: {output}")
+    return output
+
+
 def main() -> list[dict]:
     parser = argparse.ArgumentParser(description="US V18 screener")
-    parser.add_argument("--universe", default="nasdaq100", choices=["nasdaq100"])
+    parser.add_argument("--universe", default="sp500", choices=["sp500", "nasdaq100"])
     parser.add_argument("--symbols", default="", help="Comma-separated symbols for a small test run")
     parser.add_argument("--symbols-file", default="", help="Text/CSV file. First column is symbol; rest is name")
-    parser.add_argument("--refresh-universe", action="store_true", help="Refresh NASDAQ-100 from the web instead of static file")
+    parser.add_argument("--refresh-universe", action="store_true", help="母集団リストをWebから再取得（静的ファイルを更新）")
+    parser.add_argument("--gsheet-id", default="", help="Google Spreadsheet ID（省略時は環境変数 GSHEET_ID）")
     parser.add_argument("--limit", type=int, default=0, help="Limit symbols for testing")
     parser.add_argument("--post-workspace", action="store_true", help=f"Post results to {WORKSPACE_WEBHOOK_ENV}")
     parser.add_argument("--post", action="store_true", help="Post results to workspace-us and #81maa-us-watch")
@@ -513,14 +703,30 @@ def main() -> list[dict]:
     print(f"Run: {datetime.now(JST):%Y-%m-%d %H:%M:%S JST}")
     print("=" * 60)
 
-    symbols = load_symbols(args)
+    symbols, sectors = load_universe(args)
     results = run_screener(symbols, limit=args.limit)
     save_report(results, args.universe)
 
+    spreadsheet_id = args.gsheet_id or os.getenv("GSHEET_ID", "")
+    history_rows: list[list[str]] = []
+    if spreadsheet_id:
+        history_rows = save_to_gsheet_us(results, sectors, spreadsheet_id)
+
+    heatmap_path = None
+    try:
+        heatmap_path = build_us_heatmap(history_rows, sectors)
+    except Exception as exc:
+        print(f"[US V18] heatmap生成をスキップ: {type(exc).__name__}: {exc}")
+
+    targets: list[str] = []
     if args.post:
-        send_to_discord(results, args.universe, ["workspace", "uswatch"])
+        targets = ["workspace", "uswatch"]
     elif args.post_workspace:
-        send_to_discord(results, args.universe, ["workspace"])
+        targets = ["workspace"]
+    if targets:
+        send_to_discord(results, args.universe, targets)
+        if heatmap_path:
+            send_heatmap_to_targets(heatmap_path, targets)
 
     print(f"Done: {len(results)} hits")
     return results
