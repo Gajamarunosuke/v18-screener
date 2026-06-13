@@ -67,6 +67,68 @@ class AggregateSectorHistoryTests(unittest.TestCase):
         self.assertEqual(heatmap.daily_totals, [0])
         self.assertEqual(heatmap.sectors, [])
 
+    def test_hybrid_ratio_reorders_by_denominator(self):
+        rows = [
+            ["日付", "コード"],
+            ["2026-06-12", "1001"],
+            ["2026-06-12", "1002"],
+            ["2026-06-12", "1003"],  # 電機 3件
+            ["2026-06-12", "1004"],
+            ["2026-06-12", "1005"],  # 保険 2件
+        ]
+        sector_map = {
+            "1001": "電機", "1002": "電機", "1003": "電機",
+            "1004": "保険", "1005": "保険",
+        }
+        denominators = {"電機": 200, "保険": 10}
+
+        hm = aggregate_sector_history(rows, sector_map, sector_denominators=denominators)
+
+        # 絶対数では電機(3)>保険(2)だが、母数補正後は保険が上位
+        self.assertEqual(hm.sectors[0], "保険")
+        self.assertEqual(hm.counts["電機"][0], 3)        # 数字は絶対数のまま
+        self.assertEqual(hm.ratios["保険"][0], round(2 / 15 * 100, 2))   # 13.33%
+        self.assertEqual(hm.ratios["電機"][0], round(3 / 205 * 100, 2))  # 1.46%
+        self.assertEqual(hm.daily_leaders[0], ("保険", 2))  # リーダーも割合ベース
+        self.assertEqual(hm.denominators["保険"], 10)
+
+    def test_without_denominator_keeps_absolute_mode(self):
+        rows = [
+            ["日付", "コード"],
+            ["2026-06-12", "1001"],
+            ["2026-06-12", "1002"],
+            ["2026-06-12", "1003"],
+            ["2026-06-12", "1004"],
+            ["2026-06-12", "1005"],
+        ]
+        sector_map = {
+            "1001": "電機", "1002": "電機", "1003": "電機",
+            "1004": "保険", "1005": "保険",
+        }
+
+        hm = aggregate_sector_history(rows, sector_map)
+
+        self.assertEqual(hm.sectors[0], "電機")  # 絶対数順
+        self.assertEqual(hm.ratios, {})
+        self.assertEqual(hm.denominators, {})
+
+    def test_renders_hybrid_png(self):
+        hm = aggregate_sector_history(
+            [
+                ["日付", "コード"],
+                ["2026-06-11", "1001"],
+                ["2026-06-12", "1004"],
+                ["2026-06-12", "1005"],
+            ],
+            {"1001": "電機", "1004": "保険", "1005": "保険"},
+            sector_denominators={"電機": 200, "保険": 10},
+        )
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / "hybrid.png"
+            render_sector_heatmap(hm, output, title="V18 業種シグナル・ヒートマップ")
+            self.assertTrue(output.exists())
+            self.assertGreater(output.stat().st_size, 1_000)
+
     def test_renders_png(self):
         heatmap = SectorHeatmap(
             dates=["2026-06-11", "2026-06-12"],

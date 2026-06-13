@@ -23,6 +23,7 @@ import pytz
 from sector_heatmap import (
     aggregate_sector_history,
     load_jpx_sector_map,
+    load_jpx_sector_totals,
     render_sector_heatmap,
     send_discord_image,
 )
@@ -421,7 +422,10 @@ def main():
     if history_rows:
         try:
             sector_map = load_jpx_sector_map(JPX_CACHE)
-            heatmap = aggregate_sector_history(history_rows, sector_map)
+            sector_totals = load_jpx_sector_totals(JPX_CACHE)
+            heatmap = aggregate_sector_history(
+                history_rows, sector_map, sector_denominators=sector_totals
+            )
             if heatmap.dates:
                 heatmap_path = OBSIDIAN_DIR / f"{heatmap.dates[-1]}_v10_sector_heatmap.png"
                 render_sector_heatmap(heatmap, heatmap_path, title="V10 業種シグナル・ヒートマップ")

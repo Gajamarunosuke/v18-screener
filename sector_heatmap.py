@@ -4,11 +4,14 @@ import json
 import urllib.request
 import uuid
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
+
+# 小母数ノイズ抑制のための分母平滑化定数（割合 = ヒット ÷ (母数 + K)）
+SMOOTH_K = 5
 
 
 @dataclass(frozen=True)
@@ -18,6 +21,9 @@ class SectorHeatmap:
     sectors: list[str]
     counts: dict[str, list[int]]
     daily_leaders: list[tuple[str, int]]
+    # ハイブリッド用（母数を渡したときのみ埋まる。空なら従来の絶対数モード）
+    denominators: dict[str, int] = field(default_factory=dict)
+    ratios: dict[str, list[float]] = field(default_factory=dict)
 
 
 def load_jpx_sector_map(jpx_path: Path) -> dict[str, str]:
@@ -27,6 +33,20 @@ def load_jpx_sector_map(jpx_path: Path) -> dict[str, str]:
         for code, sector in zip(frame.iloc[:, 1], frame.iloc[:, 5])
         if str(sector).strip() not in {"", "-", "nan"}
     }
+
+
+def load_jpx_sector_totals(jpx_path: Path, market_keyword: str = "プライム") -> dict[str, int]:
+    """業種別の母数（プライム上場銘柄数）を返す。ハイブリッド表示の割合計算に使う。"""
+    frame = pd.read_excel(jpx_path)
+    frame.columns = [str(c).strip() for c in frame.columns]
+    if market_keyword and "市場・商品区分" in frame.columns:
+        frame = frame[frame["市場・商品区分"].astype(str).str.contains(market_keyword, na=False)]
+    totals: Counter = Counter()
+    for sector in frame.iloc[:, 5]:
+        text = str(sector).strip()
+        if text not in {"", "-", "nan"}:
+            totals[text] += 1
+    return dict(totals)
 
 
 def _normalize_date(value: object) -> str:
@@ -44,6 +64,7 @@ def aggregate_sector_history(
     sector_map: dict[str, str],
     max_days: int = 10,
     max_sectors: int = 15,
+    sector_denominators: dict[str, int] | None = None,
 ) -> SectorHeatmap:
     if not rows:
         return SectorHeatmap([], [], [], {}, [])
@@ -75,27 +96,57 @@ def aggregate_sector_history(
         Counter(sector_map[code] for code in codes_by_date[date])
         for date in dates
     ]
-    sector_totals = Counter()
+    sector_sums: Counter = Counter()
     for counter in daily_counters:
-        sector_totals.update(counter)
+        sector_sums.update(counter)
 
-    sectors = [
-        sector
-        for sector, _ in sorted(
-            sector_totals.items(),
+    hybrid = bool(sector_denominators)
+
+    def _ratio(sector: str, count: int) -> float:
+        denom = sector_denominators.get(sector, 0) if sector_denominators else 0
+        return count / (denom + SMOOTH_K) * 100
+
+    if hybrid:
+        # 行の選択・並びは「期間合計の平滑化割合」降順（＝勢い順）
+        ordered = sorted(
+            sector_sums.items(),
+            key=lambda item: (-_ratio(item[0], item[1]), item[0]),
+        )
+    else:
+        # 従来：絶対数合計の降順
+        ordered = sorted(
+            sector_sums.items(),
             key=lambda item: (-item[1], item[0]),
-        )[:max_sectors]
-    ]
+        )
+    sectors = [sector for sector, _ in ordered[:max_sectors]]
+
     counts = {
         sector: [counter.get(sector, 0) for counter in daily_counters]
         for sector in sectors
     }
-    leaders = [
-        max(counter.items(), key=lambda item: (item[1], item[0]))
-        if counter
-        else ("候補なし", 0)
-        for counter in daily_counters
-    ]
+
+    if hybrid:
+        ratios = {
+            sector: [round(_ratio(sector, counter.get(sector, 0)), 2) for counter in daily_counters]
+            for sector in sectors
+        }
+        denominators = {sector: int(sector_denominators.get(sector, 0)) for sector in sectors}
+        # 日次リーダーは「平滑化割合」最大の業種（勢いベース）。表示用カウントは絶対数。
+        leaders = [
+            max(counter.items(), key=lambda item: (_ratio(item[0], item[1]), item[1], item[0]))
+            if counter
+            else ("候補なし", 0)
+            for counter in daily_counters
+        ]
+    else:
+        ratios = {}
+        denominators = {}
+        leaders = [
+            max(counter.items(), key=lambda item: (item[1], item[0]))
+            if counter
+            else ("候補なし", 0)
+            for counter in daily_counters
+        ]
 
     return SectorHeatmap(
         dates=dates,
@@ -103,6 +154,8 @@ def aggregate_sector_history(
         sectors=sectors,
         counts=counts,
         daily_leaders=leaders,
+        denominators=denominators,
+        ratios=ratios,
     )
 
 
@@ -140,6 +193,19 @@ def _heat_color(value: int) -> tuple[int, int, int]:
     return 31, 34, 45
 
 
+def _heat_color_ratio(pct: float) -> tuple[int, int, int]:
+    """割合(%)ベースの濃淡。母数で補正済みの『業種内シグナル比率』に使う。"""
+    if pct >= 12:
+        return 19, 173, 112
+    if pct >= 6:
+        return 45, 139, 103
+    if pct >= 3:
+        return 48, 98, 82
+    if pct > 0:
+        return 42, 65, 61
+    return 31, 34, 45
+
+
 def render_sector_heatmap(
     heatmap: SectorHeatmap,
     output_path: Path,
@@ -151,6 +217,7 @@ def render_sector_heatmap(
         raise ValueError("Heatmap history is empty")
 
     date_count = len(heatmap.dates)
+    hybrid = bool(heatmap.ratios)
     width = max(1400, 310 + date_count * 130)
     height = 310 + len(heatmap.sectors) * 48 + 90
     image = Image.new("RGB", (width, height), (18, 20, 27))
@@ -174,12 +241,12 @@ def render_sector_heatmap(
 
     draw.text((58, 36), title, font=fonts["title"], fill=text)
     period = f"{heatmap.dates[0].replace('-', '/')} - {heatmap.dates[-1][5:].replace('-', '/')}"
-    draw.text(
-        (60, 88),
-        f"{period}  |  直近{date_count}営業日  |  セル内はヒット銘柄数",
-        font=fonts["subtitle"],
-        fill=muted,
+    subtitle = (
+        f"{period}  |  直近{date_count}営業日  |  色＝業種内シグナル比率・数字＝銘柄数"
+        if hybrid
+        else f"{period}  |  直近{date_count}営業日  |  セル内はヒット銘柄数"
     )
+    draw.text((60, 88), subtitle, font=fonts["subtitle"], fill=muted)
 
     left = 58
     label_width = 250
@@ -217,9 +284,14 @@ def render_sector_heatmap(
 
         for column_index, value in enumerate(heatmap.counts[sector]):
             x0 = left + label_width + column_index * cell_width
+            cell_color = (
+                _heat_color_ratio(heatmap.ratios[sector][column_index])
+                if hybrid
+                else _heat_color(value)
+            )
             draw.rectangle(
                 (x0 + 2, y0 + 2, x0 + cell_width - 2, y0 + row_height - 2),
-                fill=_heat_color(value),
+                fill=cell_color,
             )
             display = "-" if value == 0 else str(value)
             box = draw.textbbox((0, 0), display, font=fonts["count"])
@@ -236,9 +308,15 @@ def render_sector_heatmap(
     legend_y = table_top + row_height + len(heatmap.sectors) * row_height + 28
     draw.line((left, legend_y - 14, width - left, legend_y - 14), fill=(59, 64, 78), width=1)
     draw.text((left, legend_y), "濃さ:", font=fonts["small"], fill=muted)
-    for index, (value, label) in enumerate(((1, "1"), (2, "2-3"), (4, "4-7"), (8, "8+"))):
+    if hybrid:
+        legend_entries = ((1.0, "<3%"), (4.0, "3-6%"), (8.0, "6-12%"), (13.0, "12%+"))
+        legend_color = _heat_color_ratio
+    else:
+        legend_entries = ((1, "1"), (2, "2-3"), (4, "4-7"), (8, "8+"))
+        legend_color = _heat_color
+    for index, (value, label) in enumerate(legend_entries):
         x0 = left + 68 + index * 110
-        draw.rectangle((x0, legend_y, x0 + 34, legend_y + 22), fill=_heat_color(value))
+        draw.rectangle((x0, legend_y, x0 + 34, legend_y + 22), fill=legend_color(value))
         draw.text((x0 + 42, legend_y + 1), label, font=fonts["small"], fill=muted)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
