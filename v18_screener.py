@@ -14,12 +14,19 @@ import os
 import json
 import unicodedata
 import urllib.request
+import uuid
 from pathlib import Path
 from datetime import datetime, timedelta
 
 import pandas as pd
 import yfinance as yf
 import pytz
+
+from sector_heatmap import (
+    aggregate_sector_history,
+    load_jpx_sector_map,
+    render_sector_heatmap,
+)
 
 _JST = pytz.timezone("Asia/Tokyo")
 
@@ -348,20 +355,56 @@ def send_discord(webhook_url: str, results: list[dict]) -> None:
     print(f"[V18] Discord通知送信完了 ({len(chunks)}メッセージ)")
 
 
+def send_discord_image(webhook_url: str, image_path: Path) -> None:
+    boundary = f"----V18Heatmap{uuid.uuid4().hex}"
+    payload = json.dumps(
+        {"content": "**V18 業種シグナル・ヒートマップ（直近10営業日）**"},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    image = image_path.read_bytes()
+
+    parts = [
+        f"--{boundary}\r\n".encode(),
+        b'Content-Disposition: form-data; name="payload_json"\r\n',
+        b"Content-Type: application/json; charset=utf-8\r\n\r\n",
+        payload,
+        b"\r\n",
+        f"--{boundary}\r\n".encode(),
+        (
+            f'Content-Disposition: form-data; name="files[0]"; '
+            f'filename="{image_path.name}"\r\n'
+        ).encode(),
+        b"Content-Type: image/png\r\n\r\n",
+        image,
+        b"\r\n",
+        f"--{boundary}--\r\n".encode(),
+    ]
+    request = urllib.request.Request(
+        webhook_url,
+        data=b"".join(parts),
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "DiscordBot (https://github.com, 1.0)",
+        },
+    )
+    urllib.request.urlopen(request, timeout=30)
+    print(f"[V18] Discordヒートマップ送信完了: {image_path}")
+
+
 # ── Google Spreadsheet出力 ────────────────────────────────────────────────────
 
-def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> str:
+def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> tuple[str, list[list[str]]]:
     """V18スクリーナー結果をGoogle Spreadsheetに書き込む。
     認証: 環境変数 GOOGLE_APPLICATION_CREDENTIALS にサービスアカウントJSONパスを指定。
     """
     if not _GSPREAD_OK:
         print("[V18] gspread未インストール。pip install gspread google-auth を実行してください。")
-        return ""
+        return "", []
 
     creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
     if not creds_path or not Path(creds_path).exists():
         print(f"[V18] GOOGLE_APPLICATION_CREDENTIALS が未設定または存在しません: {creds_path!r}")
-        return ""
+        return "", []
 
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
@@ -413,10 +456,11 @@ def save_to_gsheet(results: list[dict], spreadsheet_id: str) -> str:
 
     hist_rows = [[today, run_time] + row for row in (data_rows if data_rows else [["本日の候補なし"]])]
     hist.append_rows(hist_rows, value_input_option="USER_ENTERED")
+    history_values = hist.get_all_values()
 
     url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
     print(f"[V18] Spreadsheet更新完了（最新+履歴）: {url}")
-    return url
+    return url, history_values
 
 
 # ── メイン ───────────────────────────────────────────────────────────────────
@@ -439,12 +483,30 @@ def main():
     results = run_screener(refresh_jpx=auto_refresh)
     path = save_report(results)
 
+    history_rows = []
     if args.gsheet_id:
-        save_to_gsheet(results, args.gsheet_id)
+        _, history_rows = save_to_gsheet(results, args.gsheet_id)
+
+    heatmap_path = None
+    if history_rows:
+        try:
+            sector_map = load_jpx_sector_map(JPX_CACHE)
+            heatmap = aggregate_sector_history(history_rows, sector_map)
+            if heatmap.dates:
+                heatmap_path = OBSIDIAN_DIR / f"{heatmap.dates[-1]}_v18_sector_heatmap.png"
+                render_sector_heatmap(heatmap, heatmap_path)
+                print(f"[V18] ヒートマップ生成完了: {heatmap_path}")
+        except Exception as exc:
+            print(f"[V18] ヒートマップ生成をスキップ: {exc}")
 
     webhook = args.discord_webhook or os.environ.get("DISCORD_WEBHOOK", "")
     if webhook:
         send_discord(webhook, results)
+        if heatmap_path:
+            try:
+                send_discord_image(webhook, heatmap_path)
+            except Exception as exc:
+                print(f"[V18] ヒートマップ投稿に失敗（一覧投稿は完了）: {exc}")
 
     print(f"\n完了: {len(results)}銘柄ヒット → {path}")
     return results
