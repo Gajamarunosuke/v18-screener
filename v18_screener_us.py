@@ -482,26 +482,29 @@ def save_report(results: list[dict], universe: str) -> Path:
     return path
 
 
-def build_discord_message(results: list[dict], universe: str) -> str:
+def build_discord_messages(results: list[dict], universe: str) -> list[str]:
+    """全ヒット銘柄を25件ずつのチャンクに分割して複数メッセージで返す（JP版V18/V10と同方式）。"""
     now = datetime.now(JST)
     sorted_results = sorted(results, key=lambda item: item["dist_m"])
 
     if not sorted_results:
-        return f"**US V18 {universe} {now:%Y-%m-%d %H:%M JST}**\n本日の候補なし"
+        return [f"**US V18 {universe} {now:%Y-%m-%d %H:%M JST}**\n本日の候補なし"]
 
-    rows = [f"{'Symbol':<8} {'Name':<18} {'Close':>8} {'Near':<4}", "-" * 44]
-    for r in sorted_results[:25]:
-        rows.append(f"{r['code']:<8} {r['name'][:18]:<18} {r['close']:>8.2f} {r['near']:<4}")
-    more = "" if len(sorted_results) <= 25 else f"\n...and {len(sorted_results) - 25} more"
-    return "\n".join(
-        [
-            f"**US V18 {universe} {now:%Y-%m-%d %H:%M JST}** — **{len(results)}銘柄**ヒット",
-            "```",
-            *rows,
-            "```",
-            more,
-        ]
-    )
+    CHUNK_SIZE = 25
+    chunks = [sorted_results[i:i + CHUNK_SIZE] for i in range(0, len(sorted_results), CHUNK_SIZE)]
+    total = len(sorted_results)
+    messages = []
+    for idx, chunk in enumerate(chunks):
+        header = (
+            f"**US V18 {universe} {now:%Y-%m-%d %H:%M JST}** — **{total}銘柄**ヒット"
+            if idx == 0
+            else f"**US V18 {universe} {now:%Y-%m-%d}** ({idx + 1}/{len(chunks)})"
+        )
+        rows = [f"{'Symbol':<8} {'Name':<18} {'Close':>8} {'Near':<4}", "-" * 44]
+        for r in chunk:
+            rows.append(f"{r['code']:<8} {r['name'][:18]:<18} {r['close']:>8.2f} {r['near']:<4}")
+        messages.append("\n".join([header, "```", *rows, "```"]))
+    return messages
 
 
 def post_json(url: str, payload: dict, headers: dict | None = None) -> None:
@@ -529,7 +532,7 @@ def find_discord_channel_id(token: str, guild_id: str, channel_name: str) -> str
 
 
 def post_to_target(
-    content: str,
+    contents: list[str],
     label: str,
     *,
     webhook_env: str,
@@ -538,8 +541,9 @@ def post_to_target(
 ) -> None:
     webhook_url = os.getenv(webhook_env, "")
     if webhook_url:
-        post_json(webhook_url, {"content": content})
-        print(f"[US V18] {label} notification sent via webhook")
+        for content in contents:
+            post_json(webhook_url, {"content": content})
+        print(f"[US V18] {label} notification sent via webhook ({len(contents)} msg)")
         return
 
     token = os.getenv("DISCORD_BOT_TOKEN", "")
@@ -547,12 +551,13 @@ def post_to_target(
     if token and not channel_id and os.getenv("DISCORD_GUILD_ID", ""):
         channel_id = find_discord_channel_id(token, os.getenv("DISCORD_GUILD_ID", ""), channel_name)
     if token and channel_id:
-        post_json(
-            f"https://discord.com/api/v10/channels/{channel_id}/messages",
-            {"content": content},
-            headers={"Authorization": f"Bot {token}"},
-        )
-        print(f"[US V18] {label} notification sent via bot token")
+        for content in contents:
+            post_json(
+                f"https://discord.com/api/v10/channels/{channel_id}/messages",
+                {"content": content},
+                headers={"Authorization": f"Bot {token}"},
+            )
+        print(f"[US V18] {label} notification sent via bot token ({len(contents)} msg)")
         return
 
     raise SystemExit(
@@ -561,7 +566,7 @@ def post_to_target(
 
 
 def send_to_discord(results: list[dict], universe: str, targets: list[str]) -> None:
-    content = build_discord_message(results, universe)
+    messages = build_discord_messages(results, universe)
     configs = {
         "workspace": {
             "label": "workspace-us",
@@ -580,7 +585,7 @@ def send_to_discord(results: list[dict], universe: str, targets: list[str]) -> N
     for target in targets:
         config = configs[target]
         try:
-            post_to_target(content, **config)
+            post_to_target(messages, **config)
         except Exception as exc:
             failures.append(f"{config['label']}: {type(exc).__name__}: {exc}")
             print(f"[US V18] {config['label']} notification failed: {type(exc).__name__}: {exc}")
