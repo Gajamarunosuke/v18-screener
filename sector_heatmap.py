@@ -361,12 +361,8 @@ def render_sector_heatmap(
     return output_path
 
 
-def send_discord_image(
-    webhook_url: str,
-    image_path: Path,
-    content: str = "**業種シグナル・ヒートマップ（直近10営業日）**",
-) -> None:
-    """ヒートマップPNGをDiscordへmultipartで添付投稿する（V10/V18/US共通）。"""
+def _build_image_multipart(image_path: Path, content: str) -> tuple[bytes, str]:
+    """ヒートマップPNGのmultipart/form-dataボディと境界文字列を組み立てる。"""
     boundary = f"----Heatmap{uuid.uuid4().hex}"
     payload = json.dumps({"content": content}, ensure_ascii=False).encode("utf-8")
     image = image_path.read_bytes()
@@ -387,9 +383,19 @@ def send_discord_image(
         b"\r\n",
         f"--{boundary}--\r\n".encode(),
     ]
+    return b"".join(parts), boundary
+
+
+def send_discord_image(
+    webhook_url: str,
+    image_path: Path,
+    content: str = "**業種シグナル・ヒートマップ（直近10営業日）**",
+) -> None:
+    """ヒートマップPNGをDiscord webhookへmultipartで添付投稿する（V10/V18/US共通）。"""
+    body, boundary = _build_image_multipart(image_path, content)
     request = urllib.request.Request(
         webhook_url,
-        data=b"".join(parts),
+        data=body,
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "User-Agent": "DiscordBot (https://github.com, 1.0)",
@@ -397,3 +403,24 @@ def send_discord_image(
     )
     urllib.request.urlopen(request, timeout=30)
     print(f"[heatmap] Discord画像送信完了: {image_path}")
+
+
+def send_discord_image_bot(
+    token: str,
+    channel_id: str,
+    image_path: Path,
+    content: str = "**業種シグナル・ヒートマップ（直近10営業日）**",
+) -> None:
+    """ヒートマップPNGをBot tokenでchannelへ添付投稿する（webhook未設定時のフォールバック）。"""
+    body, boundary = _build_image_multipart(image_path, content)
+    request = urllib.request.Request(
+        f"https://discord.com/api/v10/channels/{channel_id}/messages",
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Authorization": f"Bot {token}",
+            "User-Agent": "DiscordBot (https://github.com, 1.0)",
+        },
+    )
+    urllib.request.urlopen(request, timeout=30)
+    print(f"[heatmap] Discord画像送信完了(bot): {image_path}")

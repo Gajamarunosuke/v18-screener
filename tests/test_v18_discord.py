@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sector_heatmap import send_discord_image
+from sector_heatmap import send_discord_image, send_discord_image_bot
 
 
 class DiscordImageTests(unittest.TestCase):
@@ -20,6 +20,24 @@ class DiscordImageTests(unittest.TestCase):
             body = request.data
             self.assertIn("multipart/form-data; boundary=", content_type)
             self.assertIn(b'name="payload_json"', body)
+            self.assertIn(b'name="files[0]"; filename="heatmap.png"', body)
+            self.assertIn(image_path.read_bytes(), body)
+
+    def test_bot_posts_png_to_channel_with_auth_header(self):
+        with tempfile.TemporaryDirectory() as directory:
+            image_path = Path(directory) / "heatmap.png"
+            image_path.write_bytes(b"\x89PNG\r\n\x1a\nsample")
+
+            with patch("urllib.request.urlopen") as urlopen:
+                send_discord_image_bot("tok123", "999000111", image_path)
+
+            request = urlopen.call_args.args[0]
+            self.assertEqual(
+                request.full_url,
+                "https://discord.com/api/v10/channels/999000111/messages",
+            )
+            self.assertEqual(request.headers["Authorization"], "Bot tok123")
+            body = request.data
             self.assertIn(b'name="files[0]"; filename="heatmap.png"', body)
             self.assertIn(image_path.read_bytes(), body)
 

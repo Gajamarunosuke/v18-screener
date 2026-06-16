@@ -29,6 +29,7 @@ from sector_heatmap import (
     normalize_us_symbol,
     render_sector_heatmap,
     send_discord_image,
+    send_discord_image_bot,
 )
 
 try:
@@ -75,6 +76,22 @@ WORKSPACE_CHANNEL_NAME = "workspace-us"
 US_WATCH_WEBHOOK_ENV = "DISCORD_WEBHOOK_US_WATCH"
 US_WATCH_CHANNEL_ENV = "US_WATCH_POST_CHANNEL_ID"
 US_WATCH_CHANNEL_NAME = "81maa-us-watch"
+
+# テキスト・ヒートマップ共通の配信先設定（webhook優先→bot tokenフォールバック）
+TARGET_CONFIGS = {
+    "workspace": {
+        "label": WORKSPACE_CHANNEL_NAME,
+        "webhook_env": WORKSPACE_WEBHOOK_ENV,
+        "channel_env": WORKSPACE_CHANNEL_ENV,
+        "channel_name": WORKSPACE_CHANNEL_NAME,
+    },
+    "uswatch": {
+        "label": US_WATCH_CHANNEL_NAME,
+        "webhook_env": US_WATCH_WEBHOOK_ENV,
+        "channel_env": US_WATCH_CHANNEL_ENV,
+        "channel_name": US_WATCH_CHANNEL_NAME,
+    },
+}
 
 
 FALLBACK_NASDAQ100 = {
@@ -567,23 +584,9 @@ def post_to_target(
 
 def send_to_discord(results: list[dict], universe: str, targets: list[str]) -> None:
     messages = build_discord_messages(results, universe)
-    configs = {
-        "workspace": {
-            "label": "workspace-us",
-            "webhook_env": WORKSPACE_WEBHOOK_ENV,
-            "channel_env": WORKSPACE_CHANNEL_ENV,
-            "channel_name": WORKSPACE_CHANNEL_NAME,
-        },
-        "uswatch": {
-            "label": "81maa-us-watch",
-            "webhook_env": US_WATCH_WEBHOOK_ENV,
-            "channel_env": US_WATCH_CHANNEL_ENV,
-            "channel_name": US_WATCH_CHANNEL_NAME,
-        },
-    }
     failures = []
     for target in targets:
-        config = configs[target]
+        config = TARGET_CONFIGS[target]
         try:
             post_to_target(messages, **config)
         except Exception as exc:
@@ -657,18 +660,41 @@ def save_to_gsheet_us(
     return history_values
 
 
+def post_heatmap_to_target(
+    image_path: Path,
+    label: str,
+    *,
+    webhook_env: str,
+    channel_env: str,
+    channel_name: str,
+) -> None:
+    """ヒートマップ画像をwebhook優先→bot tokenフォールバックでtargetへ投稿（テキストと同方式）。"""
+    webhook_url = os.getenv(webhook_env, "")
+    if webhook_url:
+        send_discord_image(webhook_url, image_path, HEATMAP_CONTENT)
+        print(f"[US V18] {label} heatmap sent via webhook")
+        return
+
+    token = os.getenv("DISCORD_BOT_TOKEN", "")
+    channel_id = os.getenv(channel_env, "")
+    if token and not channel_id and os.getenv("DISCORD_GUILD_ID", ""):
+        channel_id = find_discord_channel_id(token, os.getenv("DISCORD_GUILD_ID", ""), channel_name)
+    if token and channel_id:
+        send_discord_image_bot(token, channel_id, image_path, HEATMAP_CONTENT)
+        print(f"[US V18] {label} heatmap sent via bot token")
+        return
+
+    print(f"[US V18] {label} heatmap skipped: webhook/bot token未設定")
+
+
 def send_heatmap_to_targets(image_path: Path, targets: list[str]) -> None:
-    """ヒートマップ画像をwebhook経由でtargetへ投稿（webhook未設定のtargetはスキップ）。"""
-    webhook_envs = {"workspace": WORKSPACE_WEBHOOK_ENV, "uswatch": US_WATCH_WEBHOOK_ENV}
+    """ヒートマップ画像をtargetへ投稿（投稿失敗は致命的にせず記録のみ）。"""
     for target in targets:
-        webhook_url = os.getenv(webhook_envs.get(target, ""), "")
-        if not webhook_url:
-            print(f"[US V18] heatmap skipped for {target}: webhook未設定")
-            continue
+        config = TARGET_CONFIGS[target]
         try:
-            send_discord_image(webhook_url, image_path, HEATMAP_CONTENT)
+            post_heatmap_to_target(image_path, **config)
         except Exception as exc:
-            print(f"[US V18] heatmap post failed for {target}: {type(exc).__name__}: {exc}")
+            print(f"[US V18] {config['label']} heatmap post failed: {type(exc).__name__}: {exc}")
 
 
 def build_us_heatmap(history_rows: list[list[str]], sectors: dict[str, str]) -> Path | None:
