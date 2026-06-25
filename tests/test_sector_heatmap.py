@@ -112,7 +112,7 @@ class AggregateSectorHistoryTests(unittest.TestCase):
         self.assertEqual(hm.ratios, {})
         self.assertEqual(hm.denominators, {})
 
-    def test_sector_rank_label_shows_top_rank_and_10_day_ratio(self):
+    def test_sector_rank_label_shows_top_rank_and_actual_window_ratio(self):
         rows = [
             ["Date", "Code"],
             ["2026-06-12", "1001"],
@@ -126,7 +126,7 @@ class AggregateSectorHistoryTests(unittest.TestCase):
             code_header="Code",
         )
 
-        self.assertEqual(sector_rank_label(hm, "Insurance", 1), "#01 10d 13.3%")
+        self.assertEqual(sector_rank_label(hm, "Insurance", 1), "#01 直近1日 13.3%")
 
     def test_calculates_streak_from_latest_trading_day(self):
         rows = [

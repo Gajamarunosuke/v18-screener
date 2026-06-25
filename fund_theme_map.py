@@ -113,6 +113,10 @@ def build_theme_trends(weeks: int = 10) -> tuple[list[str], dict[str, list[int |
     return dates, scores
 
 
+def theme_rank_label(rank: int) -> str:
+    return f"#{rank:02d} 固定テーマ"
+
+
 def render_theme_map(
     dates: list[str],
     scores: dict[str, list[int | None]],
@@ -127,8 +131,8 @@ def render_theme_map(
     themes = [name for name, _ in THEMES]
     week_count = len(dates)
     left = 58
-    label_width = 300
-    width = max(1380, left * 2 + label_width + week_count * 104)
+    label_width = 320
+    width = max(1420, left * 2 + label_width + week_count * 104)
     row_height = 48
     table_top = 168
     height = table_top + row_height * (len(themes) + 1) + 96
@@ -159,7 +163,7 @@ def render_theme_map(
 
     draw.text(
         (60, 116),
-        f"{len(themes)} fixed themes  |  left=#display order",
+        f"固定{len(themes)}テーマ  |  左=#表示順",
         font=fonts["small"],
         fill=muted,
     )
@@ -181,7 +185,7 @@ def render_theme_map(
             draw.rectangle((left, y0, left + label_width, y0 + row_height - 2), fill=panel)
         label = theme if len(theme) <= 22 else f"{theme[:21]}..."
         draw.text((left + 10, y0 + 7), label, font=fonts["label"], fill=text)
-        draw.text((left + 10, y0 + 29), f"#{row_index + 1:02d} fixed theme list", font=fonts["small"], fill=muted)
+        draw.text((left + 10, y0 + 29), theme_rank_label(row_index + 1), font=fonts["small"], fill=muted)
 
         for column_index, score in enumerate(scores[theme]):
             x0 = left + label_width + column_index * cell_width

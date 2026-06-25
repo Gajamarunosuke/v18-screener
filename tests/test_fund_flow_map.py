@@ -45,7 +45,7 @@ class FundFlowHistoryTests(unittest.TestCase):
             asset_types={"Fund A": "Equity"},
         )
 
-        self.assertEqual(fund_flow_rank_label(history, "Fund A", 1), "#01 latest 1")
+        self.assertEqual(fund_flow_rank_label(history, "Fund A", 1), "#01 最新1位")
 
     def test_renders_rank_movement_png(self):
         rows = [

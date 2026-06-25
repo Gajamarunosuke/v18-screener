@@ -139,8 +139,8 @@ def _flow_color(change: int | None) -> tuple[int, int, int]:
 def fund_flow_rank_label(history: FundFlowHistory, fund: str, rank: int) -> str:
     latest = next((value for value in reversed(history.ranks.get(fund, [])) if value is not None), None)
     if latest is None:
-        return f"#{rank:02d} latest -"
-    return f"#{rank:02d} latest {latest}"
+        return f"#{rank:02d} 最新-"
+    return f"#{rank:02d} 最新{latest}位"
 
 
 def render_fund_flow_map(
@@ -154,11 +154,11 @@ def render_fund_flow_map(
         raise ValueError("Fund flow history is empty")
 
     left = 58
-    label_width = 430
+    label_width = 450
     row_height = 54
     table_top = 174
     week_count = len(history.weeks)
-    width = max(1460, left * 2 + label_width + week_count * 96)
+    width = max(1500, left * 2 + label_width + week_count * 96)
     height = table_top + row_height * (len(history.funds) + 1) + 100
     image = Image.new("RGB", (width, height), (18, 20, 27))
     draw = ImageDraw.Draw(image)
@@ -196,7 +196,7 @@ def render_fund_flow_map(
 
     draw.text(
         (left + 2, 138),
-        f"Top {len(history.funds)} funds  |  left=#display rank / latest latest-week rank",
+        f"上位{len(history.funds)}投信  |  左=#表示順位 / 最新=直近週順位",
         font=fonts["small"],
         fill=muted,
     )

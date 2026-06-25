@@ -233,12 +233,13 @@ def _heat_color_ratio(pct: float) -> tuple[int, int, int]:
 
 
 def sector_rank_label(heatmap: SectorHeatmap, sector: str, rank: int) -> str:
+    window = len(heatmap.dates)
     total = sum(heatmap.counts.get(sector, []))
     if heatmap.ratios:
         denom = heatmap.denominators.get(sector, 0)
         ratio = total / (denom + SMOOTH_K) * 100
-        return f"#{rank:02d} 10d {ratio:.1f}%"
-    return f"#{rank:02d} 10d {total}"
+        return f"#{rank:02d} 直近{window}日 {ratio:.1f}%"
+    return f"#{rank:02d} 直近{window}日 {total}銘柄"
 
 
 def render_sector_heatmap(
@@ -253,7 +254,7 @@ def render_sector_heatmap(
 
     date_count = len(heatmap.dates)
     hybrid = bool(heatmap.ratios)
-    width = max(1460, 370 + date_count * 130)
+    width = max(1560, 430 + date_count * 130)
     height = 310 + len(heatmap.sectors) * 48 + 90
     image = Image.new("RGB", (width, height), (18, 20, 27))
     draw = ImageDraw.Draw(image)
@@ -286,7 +287,7 @@ def render_sector_heatmap(
     draw.text((60, 88), subtitle, font=fonts["subtitle"], fill=muted)
 
     left = 58
-    label_width = 310
+    label_width = 360
     table_width = width - left * 2
     cell_width = (table_width - label_width) / date_count
 
