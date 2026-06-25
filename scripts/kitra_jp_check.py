@@ -9,6 +9,7 @@ V18スクリーナーがHITした銘柄を1つずつ TradingView の symbol TSE:
 
 import os
 import json
+import re
 import subprocess
 import time
 import urllib.request
@@ -23,6 +24,7 @@ from google.oauth2.service_account import Credentials
 SCRIPT_DIR     = Path(__file__).resolve().parent
 BASE_DIR       = SCRIPT_DIR.parent
 SECRET_ENV     = Path(r"D:\60 Obsidian\10_operations\secrets\.env")
+OUTPUT_DIR     = BASE_DIR / "output"
 JPX_CACHE      = BASE_DIR / "data" / "storage" / "jpx_listing.xls"  # v18_screenerが取得・更新
 TV_MCP_DIR     = os.environ.get("TRADINGVIEW_MCP_DIR", r"D:\60 Obsidian\50_workspace\tools\tradingview-mcp")
 SPREADSHEET_ID = os.environ.get("KITRA_SPREADSHEET_ID") or os.environ.get("GSHEET_ID", "")
@@ -53,15 +55,16 @@ load_env_file(BASE_DIR / ".env")
 load_env_file(SECRET_ENV)
 
 SPREADSHEET_ID = os.environ.get("KITRA_SPREADSHEET_ID") or os.environ.get("GSHEET_ID", SPREADSHEET_ID)
-DISCORD_WEBHOOKS = [
-    webhook.strip()
-    for webhook in [
-        os.environ.get("DISCORD_WEBHOOK_KITRA", ""),
-        os.environ.get("DISCORD_WEBHOOK_KITRA_WORKSPACE", ""),
-        os.environ.get("DISCORD_WEBHOOK_workspace-jp", ""),
-    ]
-    if webhook.strip()
-]
+DISCORD_WEBHOOKS = []
+for webhook in [
+    os.environ.get("DISCORD_WEBHOOK_KITRA", ""),
+    os.environ.get("DISCORD_WEBHOOK_kitra", ""),
+    os.environ.get("DISCORD_WEBHOOK_KITRA_WORKSPACE", ""),
+    os.environ.get("DISCORD_WEBHOOK_workspace-jp", ""),
+]:
+    webhook = webhook.strip()
+    if webhook and webhook not in DISCORD_WEBHOOKS:
+        DISCORD_WEBHOOKS.append(webhook)
 
 
 # ── JPX銘柄名マップ（コード→銘柄名）─────────────────────────────────────────────
@@ -79,9 +82,45 @@ def get_name_map() -> dict[str, str]:
 
 # ── V18結果をSpreadsheetから取得 ──────────────────────────────────────────────
 
+def get_v18_results_from_latest_report(today: str | None = None) -> list[dict]:
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    report = OUTPUT_DIR / f"{today}_v18_screener.md"
+    if not report.exists():
+        reports = sorted(OUTPUT_DIR.glob("*_v18_screener.md"), reverse=True)
+        latest = f" Latest local report: {reports[0].name}." if reports else ""
+        if reports and os.environ.get("KITRA_ALLOW_STALE_LOCAL_REPORT", "").strip() == "1":
+            report = reports[0]
+            print(f"    [警告] 今日のローカルV18結果がないため古いレポートを使用: {report.name}")
+        else:
+            raise SystemExit(
+                "KITRA_SPREADSHEET_ID/GSHEET_ID is not configured, "
+                f"and today's local V18 report does not exist: {report.name}."
+                f"{latest} Run v18_screener.py first or configure KITRA_SPREADSHEET_ID."
+            )
+
+    rows = []
+    for line in report.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip().startswith("| [["):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 8:
+            continue
+        code_match = re.search(r"\[\[(\d{4})\]\]", cells[0])
+        if not code_match:
+            continue
+        rows.append({
+            "コード": code_match.group(1),
+            "終値": cells[1],
+            "MA距離(%)": cells[5],
+            "近接": cells[6],
+            "出来高(20均)": cells[7],
+        })
+    print(f"    Spreadsheet ID未設定のためローカルV18結果を使用: {report.name}")
+    return rows
+
 def get_v18_results() -> list[dict]:
     if not SPREADSHEET_ID:
-        raise SystemExit("KITRA_SPREADSHEET_ID or GSHEET_ID is not configured.")
+        return get_v18_results_from_latest_report()
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
@@ -163,6 +202,10 @@ def send_discord(webhook: str, results: list[dict], today: str, total: int):
 # ── Spreadsheet書き込み ────────────────────────────────────────────────────────
 
 def save_to_gsheet(results: list[dict], today: str, run_time: str):
+    if not SPREADSHEET_ID:
+        print("[Spreadsheet] KITRA_SPREADSHEET_ID/GSHEET_ID未設定のため保存をスキップ")
+        return
+
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",

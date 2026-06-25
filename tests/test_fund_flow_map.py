@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from fund_flow_map import build_fund_flow_history, render_fund_flow_map
+from fund_flow_map import FundFlowHistory, build_fund_flow_history, fund_flow_rank_label, render_fund_flow_map
 
 
 class FundFlowHistoryTests(unittest.TestCase):
@@ -35,6 +35,17 @@ class FundFlowHistoryTests(unittest.TestCase):
 
         self.assertEqual(history.weeks, ["06/07"])
         self.assertEqual(history.ranks["全世界株式"], [1])
+
+    def test_fund_flow_rank_label_shows_display_and_latest_rank(self):
+        history = FundFlowHistory(
+            weeks=["06/07", "06/14"],
+            funds=["Fund A"],
+            ranks={"Fund A": [3, 1]},
+            changes={"Fund A": [None, 2]},
+            asset_types={"Fund A": "Equity"},
+        )
+
+        self.assertEqual(fund_flow_rank_label(history, "Fund A", 1), "#01 latest 1")
 
     def test_renders_rank_movement_png(self):
         rows = [

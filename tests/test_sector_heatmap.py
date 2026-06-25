@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from sector_heatmap import SectorHeatmap, aggregate_sector_history, render_sector_heatmap
+from sector_heatmap import SectorHeatmap, aggregate_sector_history, render_sector_heatmap, sector_rank_label
 
 
 class AggregateSectorHistoryTests(unittest.TestCase):
@@ -111,6 +111,22 @@ class AggregateSectorHistoryTests(unittest.TestCase):
         self.assertEqual(hm.sectors[0], "電機")  # 絶対数順
         self.assertEqual(hm.ratios, {})
         self.assertEqual(hm.denominators, {})
+
+    def test_sector_rank_label_shows_top_rank_and_10_day_ratio(self):
+        rows = [
+            ["Date", "Code"],
+            ["2026-06-12", "1001"],
+            ["2026-06-12", "1002"],
+        ]
+        hm = aggregate_sector_history(
+            rows,
+            {"1001": "Insurance", "1002": "Insurance"},
+            sector_denominators={"Insurance": 10},
+            date_header="Date",
+            code_header="Code",
+        )
+
+        self.assertEqual(sector_rank_label(hm, "Insurance", 1), "#01 10d 13.3%")
 
     def test_calculates_streak_from_latest_trading_day(self):
         rows = [

@@ -7,6 +7,7 @@ echo ============================================
 echo.
 
 cd /d "%~dp0"
+set "PYTHONPATH=%CD%\.deps;%PYTHONPATH%"
 python scripts\kitra_jp_check.py
 
 echo.

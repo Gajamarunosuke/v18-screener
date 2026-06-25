@@ -232,6 +232,15 @@ def _heat_color_ratio(pct: float) -> tuple[int, int, int]:
     return 31, 34, 45
 
 
+def sector_rank_label(heatmap: SectorHeatmap, sector: str, rank: int) -> str:
+    total = sum(heatmap.counts.get(sector, []))
+    if heatmap.ratios:
+        denom = heatmap.denominators.get(sector, 0)
+        ratio = total / (denom + SMOOTH_K) * 100
+        return f"#{rank:02d} 10d {ratio:.1f}%"
+    return f"#{rank:02d} 10d {total}"
+
+
 def render_sector_heatmap(
     heatmap: SectorHeatmap,
     output_path: Path,
@@ -244,7 +253,7 @@ def render_sector_heatmap(
 
     date_count = len(heatmap.dates)
     hybrid = bool(heatmap.ratios)
-    width = max(1400, 310 + date_count * 130)
+    width = max(1460, 370 + date_count * 130)
     height = 310 + len(heatmap.sectors) * 48 + 90
     image = Image.new("RGB", (width, height), (18, 20, 27))
     draw = ImageDraw.Draw(image)
@@ -256,7 +265,7 @@ def render_sector_heatmap(
         "subtitle": ImageFont.truetype(regular, 17),
         "header": ImageFont.truetype(bold, 19),
         "card": ImageFont.truetype(bold, 16),
-        "label": ImageFont.truetype(regular, 18),
+        "label": ImageFont.truetype(regular, 17),
         "streak": ImageFont.truetype(bold, 13),
         "count": ImageFont.truetype(bold, 24),
         "small": ImageFont.truetype(regular, 14),
@@ -273,10 +282,11 @@ def render_sector_heatmap(
         if hybrid
         else f"{period}  |  直近{date_count}営業日  |  セル内はヒット銘柄数"
     )
+    subtitle = f"{subtitle}  |  上位{len(heatmap.sectors)}業種"
     draw.text((60, 88), subtitle, font=fonts["subtitle"], fill=muted)
 
     left = 58
-    label_width = 250
+    label_width = 310
     table_width = width - left * 2
     cell_width = (table_width - label_width) / date_count
 
@@ -296,7 +306,7 @@ def render_sector_heatmap(
 
     table_top = 252
     row_height = 48
-    draw.text((left + 10, table_top + 10), "業種", font=fonts["header"], fill=muted)
+    draw.text((left + 10, table_top + 10), "順位 / 業種", font=fonts["header"], fill=muted)
     for index, date in enumerate(heatmap.dates):
         x0 = left + label_width + index * cell_width
         label = date[5:].replace("-", "/")
@@ -307,13 +317,15 @@ def render_sector_heatmap(
         y0 = table_top + row_height + row_index * row_height
         if row_index % 2 == 0:
             draw.rectangle((left, y0, left + label_width, y0 + row_height - 2), fill=panel)
-        draw.text((left + 10, y0 + 12), sector, font=fonts["label"], fill=text)
+        rank_label = sector_rank_label(heatmap, sector, row_index + 1)
+        draw.text((left + 10, y0 + 7), sector, font=fonts["label"], fill=text)
+        draw.text((left + 10, y0 + 29), rank_label, font=fonts["small"], fill=muted)
         streak = heatmap.streaks.get(sector, 0)
         if streak >= 2:
             streak_label = f"{streak}日連続"
             streak_box = draw.textbbox((0, 0), streak_label, font=fonts["streak"])
             draw.text(
-                (left + label_width - (streak_box[2] - streak_box[0]) - 10, y0 + 15),
+                (left + label_width - (streak_box[2] - streak_box[0]) - 10, y0 + 29),
                 streak_label,
                 font=fonts["streak"],
                 fill=accent,

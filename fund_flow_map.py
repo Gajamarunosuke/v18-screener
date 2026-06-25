@@ -136,6 +136,13 @@ def _flow_color(change: int | None) -> tuple[int, int, int]:
     return 55, 60, 74
 
 
+def fund_flow_rank_label(history: FundFlowHistory, fund: str, rank: int) -> str:
+    latest = next((value for value in reversed(history.ranks.get(fund, [])) if value is not None), None)
+    if latest is None:
+        return f"#{rank:02d} latest -"
+    return f"#{rank:02d} latest {latest}"
+
+
 def render_fund_flow_map(
     history: FundFlowHistory,
     output_path: Path,
@@ -147,11 +154,11 @@ def render_fund_flow_map(
         raise ValueError("Fund flow history is empty")
 
     left = 58
-    label_width = 390
+    label_width = 430
     row_height = 54
     table_top = 174
     week_count = len(history.weeks)
-    width = max(1420, left * 2 + label_width + week_count * 96)
+    width = max(1460, left * 2 + label_width + week_count * 96)
     height = table_top + row_height * (len(history.funds) + 1) + 100
     image = Image.new("RGB", (width, height), (18, 20, 27))
     draw = ImageDraw.Draw(image)
@@ -164,6 +171,7 @@ def render_fund_flow_map(
         "header": ImageFont.truetype(bold, 18),
         "label": ImageFont.truetype(regular, 17),
         "asset": ImageFont.truetype(regular, 12),
+        "meta": ImageFont.truetype(regular, 13),
         "rank": ImageFont.truetype(bold, 23),
         "delta": ImageFont.truetype(bold, 12),
         "small": ImageFont.truetype(regular, 14),
@@ -186,9 +194,16 @@ def render_fund_flow_map(
         fill=muted,
     )
 
+    draw.text(
+        (left + 2, 138),
+        f"Top {len(history.funds)} funds  |  left=#display rank / latest latest-week rank",
+        font=fonts["small"],
+        fill=muted,
+    )
+
     table_width = width - left * 2
     cell_width = (table_width - label_width) / week_count
-    draw.text((left + 10, table_top + 15), "投信", font=fonts["header"], fill=muted)
+    draw.text((left + 10, table_top + 15), "順位 / 投信", font=fonts["header"], fill=muted)
     for index, week in enumerate(history.weeks):
         x0 = left + label_width + index * cell_width
         box = draw.textbbox((0, 0), week, font=fonts["header"])
@@ -200,7 +215,8 @@ def render_fund_flow_map(
             draw.rectangle((left, y0, left + label_width, y0 + row_height - 2), fill=panel)
         label = fund if len(fund) <= 28 else f"{fund[:27]}…"
         draw.text((left + 10, y0 + 7), label, font=fonts["label"], fill=text)
-        draw.text((left + 10, y0 + 31), history.asset_types.get(fund, ""), font=fonts["asset"], fill=muted)
+        meta = f"{fund_flow_rank_label(history, fund, row_index + 1)}  {history.asset_types.get(fund, '')}"
+        draw.text((left + 10, y0 + 31), meta, font=fonts["meta"], fill=muted)
 
         for column_index, rank in enumerate(history.ranks[fund]):
             change = history.changes[fund][column_index]
