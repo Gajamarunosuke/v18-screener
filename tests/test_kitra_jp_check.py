@@ -13,6 +13,10 @@ import kitra_jp_check
 
 
 class KitraLocalReportTests(unittest.TestCase):
+    def test_run_date_can_be_overridden_for_retry(self):
+        with patch.dict(kitra_jp_check.os.environ, {"KITRA_RUN_DATE": "2026-06-26"}, clear=False):
+            self.assertEqual(kitra_jp_check.run_date(), "2026-06-26")
+
     def test_reads_only_today_local_v18_report(self):
         with tempfile.TemporaryDirectory() as directory:
             output_dir = Path(directory)

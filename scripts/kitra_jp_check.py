@@ -67,6 +67,10 @@ for webhook in [
         DISCORD_WEBHOOKS.append(webhook)
 
 
+def run_date() -> str:
+    return os.environ.get("KITRA_RUN_DATE", "").strip() or datetime.now().strftime("%Y-%m-%d")
+
+
 # ── JPX銘柄名マップ（コード→銘柄名）─────────────────────────────────────────────
 
 def get_name_map() -> dict[str, str]:
@@ -250,7 +254,7 @@ def save_to_gsheet(results: list[dict], today: str, run_time: str):
 # ── メイン ───────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    today    = datetime.now().strftime("%Y-%m-%d")
+    today    = run_date()
     run_time = datetime.now().strftime("%H:%M")
 
     print(f"\n{'='*55}")
