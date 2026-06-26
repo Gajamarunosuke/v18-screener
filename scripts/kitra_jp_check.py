@@ -152,7 +152,11 @@ def get_v18_results() -> list[dict]:
 # ── TradingView MCP ────────────────────────────────────────────────────────────
 
 def tv_run(cmd: list[str]) -> dict | None:
-    r = subprocess.run(cmd, cwd=TV_MCP_DIR, capture_output=True, text=True, timeout=30, **ENC)
+    try:
+        r = subprocess.run(cmd, cwd=TV_MCP_DIR, capture_output=True, text=True, timeout=30, **ENC)
+    except subprocess.TimeoutExpired:
+        print(f"\n    [警告] TradingView MCP timeout: {' '.join(cmd)}")
+        return None
     try:
         return json.loads(r.stdout)
     except Exception:
@@ -270,7 +274,11 @@ if __name__ == "__main__":
         name = name_map.get(code, "")
         row["銘柄名"] = name
         print(f"  [{i:2d}/{total}] {code} {name[:10]}...", end=" ", flush=True)
-        passed = get_kitra_signal(code)
+        try:
+            passed = get_kitra_signal(code)
+        except Exception as exc:  # noqa: BLE001
+            print(f"ERROR({type(exc).__name__})")
+            continue
         if passed:
             kitra_pass.append(row)
             print("PASS")

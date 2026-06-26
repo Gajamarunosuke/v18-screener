@@ -1,4 +1,5 @@
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,14 @@ class KitraLocalReportTests(unittest.TestCase):
                         kitra_jp_check.get_v18_results_from_latest_report("2026-06-22")
 
         self.assertIn("today's local V18 report does not exist", str(raised.exception))
+
+    def test_tv_run_timeout_is_treated_as_missing_values(self):
+        with patch.object(
+            kitra_jp_check.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired(["node", "values"], 30),
+        ):
+            self.assertIsNone(kitra_jp_check.tv_run(["node", "values"]))
 
 
 if __name__ == "__main__":
